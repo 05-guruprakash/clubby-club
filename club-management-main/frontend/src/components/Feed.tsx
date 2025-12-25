@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { collection, query, where, getDocs, doc, getDoc, updateDoc, arrayUnion, increment } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, getDoc, updateDoc, deleteDoc, arrayUnion, increment } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 import { useAuth } from '../AuthContext';
 import ChatRoom from './ChatRoom';
@@ -35,6 +35,7 @@ const Feed = () => {
     const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
     const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
     const [requests, setRequests] = useState<any[]>([]);
+    const [currentEventName, setCurrentEventName] = useState('');
 
     // Mock Posts for now (In real app, fetch from 'posts' collection)
     const mockPosts: Post[] = [
@@ -85,7 +86,7 @@ const Feed = () => {
                     const docs = await Promise.all(promises);
                     const membersData = docs.map(d => ({
                         uid: d.id,
-                        name: d.data()?.name || d.data()?.email || 'Unknown',
+                        name: d.data()?.username || d.data()?.email || 'Unknown',
                         role: d.id === (team as any).leaderId ? 'Leader' : 'Member'
                     }));
                     setTeamMembers(membersData);
@@ -111,6 +112,43 @@ const Feed = () => {
             fetchDetails();
         }
     }, [selectedTeamId, myTeams, tab, user]);
+
+    useEffect(() => {
+        const loadEventName = async () => {
+            if (!selectedTeamId) return;
+            const team = myTeams.find(t => t.id === selectedTeamId);
+            if (team) {
+                const ev = await getDoc(doc(db, 'events', team.eventId));
+                setCurrentEventName(ev.data()?.title || '');
+            }
+        };
+        loadEventName();
+    }, [selectedTeamId, myTeams]);
+
+    const handleRemoveMember = async (memberId: string) => {
+        if (!confirm('Remove this member?')) return;
+        try {
+            const team = myTeams.find(t => t.id === selectedTeamId);
+            if (!team) return;
+
+            await updateDoc(doc(db, 'teams', team.id), {
+                members: team.members?.filter(m => m !== memberId),
+                current_members: increment(-1)
+            });
+
+            setTeamMembers(prev => prev.filter(m => m.uid !== memberId));
+        } catch (e) { console.error(e); }
+    };
+
+    const handleDeleteTeam = async () => {
+        if (!confirm('Delete this team entirely? This cannot be undone.')) return;
+        try {
+            if (!selectedTeamId) return;
+            await deleteDoc(doc(db, 'teams', selectedTeamId));
+            setSelectedTeamId(null);
+            setMyTeams(prev => prev.filter(t => t.id !== selectedTeamId));
+        } catch (e) { console.error(e); }
+    };
 
     const handleAccept = async (req: any) => {
         try {
@@ -153,7 +191,12 @@ const Feed = () => {
                                 </button>
                             ))}
                         </div>
-                        {selectedTeamId ? <ChatRoom communityId={selectedTeamId} type="team" /> : <p>Select a team.</p>}
+                        {selectedTeamId ? (
+                            <>
+                                <h3 style={{ marginTop: 0, color: '#aaa' }}>{currentEventName}</h3>
+                                <ChatRoom communityId={selectedTeamId} type="team" />
+                            </>
+                        ) : <p>Select a team.</p>}
                     </div>
 
                     {/* Right: Sidebar */}
@@ -179,9 +222,21 @@ const Feed = () => {
                         <h3>Team Members</h3>
                         <ul style={{ listStyle: 'none', padding: 0 }}>
                             {teamMembers.map(m => (
-                                <li key={m.uid} style={{ padding: '5px', borderBottom: '1px solid #eee' }}>{m.name} <span style={{ fontSize: '0.8rem', color: '#777' }}>({m.role})</span></li>
+                                <li key={m.uid} style={{ padding: '5px', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <span>{m.name} <span style={{ fontSize: '0.8rem', color: '#777' }}>({m.role})</span></span>
+                                    {/* Leader can remove members (except themselves) */}
+                                    {myTeams.find(t => t.id === selectedTeamId)?.leaderId === user?.uid && m.uid !== user?.uid && (
+                                        <button onClick={() => handleRemoveMember(m.uid)} style={{ color: 'red', background: 'none', border: 'none', cursor: 'pointer' }}>Remove</button>
+                                    )}
+                                </li>
                             ))}
                         </ul>
+                        {/* Leader can delete team */}
+                        {myTeams.find(t => t.id === selectedTeamId)?.leaderId === user?.uid && (
+                            <button onClick={handleDeleteTeam} style={{ marginTop: '20px', background: 'darkred', color: 'white', border: 'none', padding: '10px', width: '100%', borderRadius: '5px', cursor: 'pointer' }}>
+                                Delete Team
+                            </button>
+                        )}
                     </div>
                 </div>
             ) : (

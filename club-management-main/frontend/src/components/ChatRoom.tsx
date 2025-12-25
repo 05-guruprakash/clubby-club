@@ -158,10 +158,20 @@ const ChatRoom: FC<ChatRoomProps> = ({ communityId, type }) => {
                 {messages.map(msg => {
                     const { color, icon } = getRoleData(msg.senderRole);
                     const isMe = msg.senderId === user?.uid;
+
+                    // Format Time
+                    let timeStr = '';
+                    if (msg.createdAt) {
+                        try {
+                            const date = msg.createdAt.toDate ? msg.createdAt.toDate() : new Date(msg.createdAt);
+                            timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                        } catch (e) { timeStr = ''; }
+                    }
+
                     return (
                         <div key={msg.id} style={{ marginBottom: '8px', textAlign: isMe ? 'right' : 'left' }}>
                             <div style={{ fontSize: '0.8rem', color: '#aaa', marginBottom: '2px' }}>
-                                {msg.senderName} {icon}
+                                {msg.senderName} <span style={{ color: color !== 'transparent' ? color : 'inherit', fontWeight: 'bold' }}>({msg.senderRole || 'member'})</span> {icon} • {timeStr}
                             </div>
                             <div style={{
                                 background: isMe ? '#4a4' : '#555',

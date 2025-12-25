@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { collection, addDoc, getDocs, query, where, updateDoc, doc, arrayUnion, increment } from 'firebase/firestore';
+import { collection, addDoc, getDocs, getDoc, query, where, updateDoc, doc, arrayUnion, increment } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 import { useAuth } from '../AuthContext';
 
@@ -159,11 +159,29 @@ const Discover = () => {
         }
     };
 
+    const checkAlreadyInTeam = async (eventId: string) => {
+        if (!user) return false;
+        // Check if I am leader or member of any team for this event
+        const q = query(collection(db, 'teams'), where('eventId', '==', eventId), where('members', 'array-contains', user.uid));
+        const snap = await getDocs(q);
+        return !snap.empty;
+    };
+
+    const handleCreateTeamWrapped = async () => {
+        if (!selectedEventId) return;
+        const already = await checkAlreadyInTeam(selectedEventId);
+        if (already) {
+            alert("You are already in a team for this event!");
+            return;
+        }
+        handleCreateTeam();
+    };
+
     const handleJoinTeam = async (teamIdFromInput: string) => {
         let targetId = teamIdFromInput || joinTeamId;
         if (!user || !targetId) return;
 
-        // Sanitize: If user pasted a URL, extract the last part
+        // Sanitize
         targetId = targetId.trim();
         if (targetId.includes('/join/')) {
             targetId = targetId.split('/join/')[1];
@@ -173,6 +191,20 @@ const Discover = () => {
         }
 
         try {
+            // Check if already in a team for this event
+            // Need team data to know eventId
+            const teamDoc = await getDoc(doc(db, 'teams', targetId));
+            if (!teamDoc.exists()) { alert("Team not found"); return; }
+
+            const eventId = teamDoc.data().eventId;
+            if (eventId) {
+                const already = await checkAlreadyInTeam(eventId);
+                if (already) {
+                    alert("You are already in a team for this event!");
+                    return;
+                }
+            }
+
             await addDoc(collection(db, 'team_members'), {
                 teamId: targetId,
                 userId: user.uid,
@@ -321,7 +353,7 @@ const Discover = () => {
                                         onChange={e => setTeamPic(e.target.value)}
                                         style={{ width: '100%', padding: '10px', marginBottom: '10px' }}
                                     />
-                                    <button onClick={handleCreateTeam} style={{ width: '100%', padding: '10px', background: '#28a745', color: 'white', border: 'none', cursor: 'pointer' }}>
+                                    <button onClick={handleCreateTeamWrapped} style={{ width: '100%', padding: '10px', background: '#28a745', color: 'white', border: 'none', cursor: 'pointer' }}>
                                         Create Team
                                     </button>
                                 </div>
