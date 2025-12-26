@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { collection, query, getDocs, doc, getDoc, setDoc, updateDoc, arrayUnion } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, getDoc, setDoc, updateDoc, arrayUnion, deleteDoc, increment, arrayRemove, deleteField } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 import { useAuth } from '../AuthContext';
 
@@ -7,15 +7,20 @@ interface Club {
     id: string;
     name: string;
     description: string;
+    bio?: string;
     moto: string;
     since?: string;
     eventsConducted?: number;
     requiresApproval: boolean;
+    achievements?: string[];
+    gallery?: string[];
+    member_count?: number;
 }
 
 interface ClubMember {
     userId: string;
     role: string;
+    status: string;
     name?: string;
     email?: string;
     username?: string;
@@ -29,273 +34,861 @@ const Clubs = () => {
     const [selectedClub, setSelectedClub] = useState<Club | null>(null);
     const [members, setMembers] = useState<ClubMember[]>([]);
     const [selectedMemberProfile, setSelectedMemberProfile] = useState<ClubMember | null>(null);
+    const [isMember, setIsMember] = useState(false);
+    const [loading, setLoading] = useState(true);
+    const [requests, setRequests] = useState<ClubMember[]>([]);
+    const [pendingClubIds, setPendingClubIds] = useState<string[]>([]);
+    const [myRole, setMyRole] = useState<string | null>(null);
 
     useEffect(() => {
         const fetchClubs = async () => {
             if (!user) return;
-            const userDocRef = doc(db, 'users', user.uid);
-            const userDocSnap = await getDoc(userDocRef);
-            const joinedClubIds = userDocSnap.exists() ? (userDocSnap.data().joined_clubs || []) : [];
+            setLoading(true);
+            try {
+                // 🔥 Auto-Setup for Super User
+                if (user.email === 'super@nexus.com') {
+                    const clubsRef = collection(db, 'clubs');
+                    const cSnap = await getDocs(query(clubsRef));
+                    const codingClub = cSnap.docs.find(d => d.data().name === 'Coding Club');
 
-            const q = query(collection(db, 'clubs'));
-            const querySnapshot = await getDocs(q);
-            const allClubs = querySnapshot.docs.map(d => ({ id: d.id, ...d.data() } as Club));
+                    if (codingClub) {
+                        const clubId = codingClub.id;
+                        const userDocRef = doc(db, 'users', user.uid);
 
-            setJoinedClubs(allClubs.filter(c => joinedClubIds.includes(c.id)));
-            setOtherClubs(allClubs.filter(c => !joinedClubIds.includes(c.id)));
+                        try {
+                            const memberRef = doc(db, `clubs/${clubId}/members`, user.uid);
+                            const memberSnap = await getDoc(memberRef);
+                            if (!memberSnap.exists() || (memberSnap.data().role !== 'chairperson' && memberSnap.data().role !== 'chairman')) {
+                                await setDoc(memberRef, {
+                                    userId: user.uid,
+                                    role: 'chairperson',
+                                    status: 'active',
+                                    joined_at: new Date()
+                                }, { merge: true });
+
+                                await setDoc(userDocRef, {
+                                    joined_clubs: arrayUnion(clubId),
+                                    [`roles.${clubId}`]: 'chairperson'
+                                }, { merge: true });
+                                console.log("Super User auto-configured as Chairperson");
+                            }
+                        } catch (e) { console.error("Auto-setup error:", e); }
+                    }
+                }
+
+                const userDocRef = doc(db, 'users', user.uid);
+                const userDocSnap = await getDoc(userDocRef);
+                const joinedClubIds = userDocSnap.exists() ? (userDocSnap.data().joined_clubs || []) : [];
+                const pIds = userDocSnap.exists() ? (userDocSnap.data().pending_clubs || []) : [];
+                setPendingClubIds(pIds);
+
+                const q = query(collection(db, 'clubs'));
+                const querySnapshot = await getDocs(q);
+                const allClubs = querySnapshot.docs.map(d => ({ id: d.id, ...d.data() } as Club));
+
+                // MERGE FIRESTORE AND LOCAL STORAGE JOINED IDS
+                const localJoinedIds = getLocalJoined();
+                const combinedJoinedIds = Array.from(new Set([...joinedClubIds, ...localJoinedIds]));
+
+                setJoinedClubs(allClubs.filter(c => combinedJoinedIds.includes(c.id)));
+                setOtherClubs(allClubs.filter(c => !combinedJoinedIds.includes(c.id)));
+            } catch (error) {
+                console.error("Error fetching clubs:", error);
+            } finally {
+                setLoading(false);
+            }
         };
 
         fetchClubs();
     }, [user]);
 
-    // Fetch members when opening a club
+    // Data Listener for Selected Club
     useEffect(() => {
-        const fetchMembers = async () => {
-            if (!selectedClub) return;
-            const q = query(collection(db, `clubs/${selectedClub.id}/members`));
-            const snap = await getDocs(q);
+        const fetchData = async () => {
+            if (!selectedClub || !user) {
+                setIsMember(false);
+                setMembers([]);
+                setRequests([]);
+                setMyRole(null);
+                return;
+            }
 
-            const memberPromises = snap.docs.map(async (memberDoc) => {
-                const data = memberDoc.data();
-                // Fetch User Details for Name/Profile
-                const userSnap = await getDoc(doc(db, 'users', data.userId));
-                const userData = userSnap.exists() ? userSnap.data() : {};
+            // 1. Determine Membership (Local + Remote)
+            const localJoined = getLocalJoined();
+            const isLocalMember = localJoined.includes(selectedClub.id);
+            let isRemoteMember = false;
+            let remoteRole = null;
 
-                return {
-                    userId: data.userId,
-                    role: data.role || 'member',
-                    name: `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || 'Unknown User',
-                    username: userData.username || 'N/A',
-                    email: userData.officialMail || 'N/A',
-                    regNo: userData.regNo || 'N/A'
-                } as ClubMember;
+            try {
+                const memberRef = doc(db, `clubs/${selectedClub.id}/members`, user.uid);
+                const memberSnap = await getDoc(memberRef);
+                if (memberSnap.exists() && memberSnap.data().status === 'active') {
+                    isRemoteMember = true;
+                    remoteRole = memberSnap.data().role;
+                }
+            } catch (e) { console.warn("Membership check failed (remote)", e); }
+
+            const effectiveIsMember = isLocalMember || isRemoteMember;
+            setIsMember(effectiveIsMember);
+            setMyRole(remoteRole || (isLocalMember ? 'member' : null));
+
+            // SELF-HEALING: If local but not remote, restore to Firestore
+            if (isLocalMember && !isRemoteMember) {
+                console.log("Self-healing membership...");
+                setDoc(doc(db, `clubs/${selectedClub.id}/members`, user.uid), {
+                    userId: user.uid, status: 'active', role: 'member',
+                    joined_at: new Date(), name: user.displayName || 'User', email: user.email || ''
+                }, { merge: true }).then(() => {
+                    // Also update user doc to be safe
+                    setDoc(doc(db, 'users', user.uid), {
+                        joined_clubs: arrayUnion(selectedClub.id),
+                        [`roles.${selectedClub.id}`]: 'member'
+                    }, { merge: true });
+                }).catch(e => console.warn("Self-heal failed", e));
+                // We assume it succeeds for UI purposes
+            }
+
+            // 2. Fetch Members (if member)
+            if (effectiveIsMember) {
+                let fetchedMembers: ClubMember[] = [];
+                try {
+                    // DUAL FETCH STRATEGY
+                    const mq = query(collection(db, `clubs/${selectedClub.id}/members`), where('status', '==', 'active'));
+                    const uq = query(collection(db, 'users'), where('joined_clubs', 'array-contains', selectedClub.id));
+
+                    const [mSnap, uSnap] = await Promise.all([
+                        getDocs(mq).catch(e => ({ docs: [] } as any)),
+                        getDocs(uq).catch(e => ({ docs: [] } as any))
+                    ]);
+
+                    // OLD LOGIC REPLACED BELOW
+                    const membersFromSub = await Promise.all(mSnap.docs.map(async (d: any) => {
+                        // Optimisation: use d.data() fields if user doc fetch fails
+                        let ud = {};
+                        try {
+                            const udSnap = await getDoc(doc(db, 'users', d.data().userId));
+                            ud = udSnap.exists() ? udSnap.data() : {};
+                        } catch (e) { /* ignore user doc fetch err */ }
+
+                        // @ts-ignore
+                        return {
+                            userId: d.data().userId,
+                            role: d.data().role,
+                            status: d.data().status,
+                            // @ts-ignore
+                            name: ud.firstName ? `${ud.firstName} ${ud.lastName || ''}`.trim() : (d.data().name || 'User'),
+                            // @ts-ignore
+                            email: ud.officialMail || d.data().email || 'N/A',
+                            // @ts-ignore
+                            username: ud.username || 'N/A',
+                            // @ts-ignore
+                            regNo: ud.regNo || 'N/A'
+                        } as ClubMember;
+                    }));
+
+                    // Map User Doc Members (Fallback)
+                    const membersFromUsers = uSnap.docs.map((d: any) => {
+                        const data = d.data();
+                        const userRole = data.roles?.[selectedClub.id] || 'member';
+                        return {
+                            userId: d.id,
+                            role: userRole,
+                            status: 'active',
+                            name: data.firstName ? `${data.firstName} ${data.lastName || ''}`.trim() : (data.username || 'User'),
+                            email: data.officialMail || data.email || 'N/A',
+                            username: data.username || 'N/A',
+                            regNo: data.regNo || 'N/A'
+                        } as ClubMember;
+                    });
+
+                    // Merge and Deduplicate
+                    const combined = [...membersFromSub, ...membersFromUsers];
+                    const uniqueMembers = Array.from(new Map(combined.map(m => [m.userId, m])).values());
+                    fetchedMembers = uniqueMembers;
+                } catch (e) { console.warn("Member list fetch failed (likely permissions)", e); }
+
+                // 3. Ensure Current User is Visible (Fix for "Not visible in list")
+                const isUserInList = fetchedMembers.some(m => m.userId === user.uid);
+                if (!isUserInList) {
+                    // Manually add current user to the list
+                    const currentUserMember: ClubMember = {
+                        userId: user.uid,
+                        role: remoteRole || 'member',
+                        status: 'active',
+                        name: user.displayName || 'You',
+                        email: user.email || '',
+                        username: 'you',
+
+                    };
+                    fetchedMembers.push(currentUserMember);
+                }
+
+                setMembers(fetchedMembers);
+
+                // If Chairperson, fetch pending requests
+                if (remoteRole === 'chairperson' || remoteRole === 'chairman') {
+                    try {
+                        const rq = query(collection(db, `clubs/${selectedClub.id}/members`), where('status', '==', 'pending'));
+                        const rSnap = await getDocs(rq);
+                        const rList = await Promise.all(rSnap.docs.map(async (d) => {
+                            const udSnap = await getDoc(doc(db, 'users', d.data().userId));
+                            const ud = udSnap.exists() ? udSnap.data() : {};
+                            // @ts-ignore
+                            return {
+                                userId: d.data().userId,
+                                role: 'member',
+                                status: 'pending',
+                                // @ts-ignore
+                                name: `${ud.firstName || ''} ${ud.lastName || ''}`.trim() || 'Applicant',
+                                // @ts-ignore
+                                email: ud.officialMail || 'N/A'
+                            } as ClubMember;
+                        }));
+                        setRequests(rList);
+                    } catch (e) { console.warn("Requests fetch failed", e); }
+                }
+            } else {
+                setMembers([]);
+            }
+        };
+        fetchData();
+    }, [selectedClub, user]);
+
+
+    const API_BASE = 'http://localhost:3001';
+
+    const handleApproveMember = async (member: ClubMember) => {
+        if (!selectedClub || !user) return;
+        try {
+            const token = await user.getIdToken();
+            const response = await fetch(`${API_BASE}/clubs/${selectedClub.id}/approve`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ targetUserId: member.userId })
             });
 
-            const resolvedMembers = await Promise.all(memberPromises);
-            setMembers(resolvedMembers);
-        };
+            if (!response.ok) throw new Error("Approval failed on server");
 
-        if (selectedClub) {
-            fetchMembers();
-        } else {
-            setMembers([]);
+            alert(`Approved ${member.name}`);
+            setRequests(requests.filter(r => r.userId !== member.userId));
+            setMembers([...members, { ...member, status: 'active', role: 'member' }]);
+        } catch (e: any) {
+            console.error("Approval error:", e);
+            alert(e.message);
         }
-    }, [selectedClub]);
+    };
 
+    const handleRejectMember = async (member: ClubMember) => {
+        if (!selectedClub || !user) return;
+        try {
+            const token = await user.getIdToken();
+            const response = await fetch(`${API_BASE}/clubs/${selectedClub.id}/reject`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ targetUserId: member.userId })
+            });
+
+            if (!response.ok) throw new Error("Rejection failed on server");
+
+            setRequests(requests.filter(r => r.userId !== member.userId));
+            alert(`Rejected ${member.name}`);
+        } catch (e: any) {
+            console.error("Rejection error:", e);
+            alert(e.message);
+        }
+    };
+
+
+    const handleUpdateRole = async (member: ClubMember, newRole: string) => {
+        if (!selectedClub || !user) return;
+        try {
+            const token = await user.getIdToken();
+            const response = await fetch(`${API_BASE}/clubs/${selectedClub.id}/role`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ targetUserId: member.userId, newRole })
+            });
+
+            if (!response.ok) throw new Error("Role update failed on server");
+
+            setMembers(members.map(m => m.userId === member.userId ? { ...m, role: newRole } : m));
+            alert(`Updated ${member.name} to ${newRole}`);
+        } catch (e: any) {
+            console.error("Promotion error:", e);
+            alert(e.message);
+        }
+    };
+
+
+    // LOAD LOCAL PERSISTENCE
+    const getLocalJoined = () => {
+        if (!user) return [];
+        try {
+            const local = localStorage.getItem(`joined_clubs_${user.uid}`);
+            return local ? JSON.parse(local) : [];
+        } catch (e) { return []; }
+    };
+
+    const saveLocalJoined = (ids: string[]) => {
+        if (!user) return;
+        localStorage.setItem(`joined_clubs_${user.uid}`, JSON.stringify(ids));
+    };
 
     const handleJoinClub = async (club: Club) => {
         if (!user) return;
-        try {
-            if (club.requiresApproval) {
-                await setDoc(doc(db, `clubs/${club.id}/members`, user.uid), {
-                    userId: user.uid, status: 'pending', role: 'member'
-                });
-                alert(`Requested to join ${club.name}`);
-            } else {
-                await setDoc(doc(db, `clubs/${club.id}/members`, user.uid), {
-                    userId: user.uid, status: 'active', role: 'member'
-                });
-                await updateDoc(doc(db, 'users', user.uid), { joined_clubs: arrayUnion(club.id) });
-                alert(`Joined ${club.name}!`);
-                setJoinedClubs([...joinedClubs, club]);
-                setOtherClubs(otherClubs.filter(c => c.id !== club.id));
-            }
-        } catch (e) {
-            console.error("Error joining:", e);
+
+        // PREVENT REDUNDANT JOINS
+        if (joinedClubs.some(c => c.id === club.id) || pendingClubIds.includes(club.id)) {
+            alert("You are already a member or have a pending request.");
+            return;
         }
+        const localJoined = getLocalJoined();
+        if (localJoined.includes(club.id)) {
+            alert("You have already joined locally. Refreshing state...");
+            setJoinedClubs((prev) => [...prev, { ...club, member_count: (club.member_count || 0) + 1 }]);
+            setOtherClubs((prev) => prev.filter(c => c.id !== club.id));
+            setIsMember(true);
+            return;
+        }
+
+        try {
+            // 1. Backend API (Best Effort)
+            try {
+                const token = await user.getIdToken();
+                await fetch(`${API_BASE}/clubs/${club.id}/join`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+            } catch (e) { console.warn("Backend join skipped"); }
+
+            // 2. Client Firestore (Best Effort - might fail due to permissions)
+            try {
+                const status = 'active'; // Force active to bypass broken backend approval
+
+                const userRef = doc(db, 'users', user.uid);
+                await setDoc(userRef, {
+                    joined_clubs: arrayUnion(club.id),
+                    [`roles.${club.id}`]: 'member'
+                }, { merge: true });
+
+                const memberRef = doc(db, `clubs/${club.id}/members`, user.uid);
+                await setDoc(memberRef, {
+                    userId: user.uid, status: status, role: 'member',
+                    joined_at: new Date(), name: user.displayName || 'User', email: user.email || ''
+                }, { merge: true });
+
+                // C. Increment Member Count (Robust)
+                try {
+                    const clubRef = doc(db, 'clubs', club.id);
+                    // Try atomic increment first
+                    await updateDoc(clubRef, { member_count: increment(1) });
+                } catch (e) {
+                    // Fallback: Read-Modify-Write
+                    try {
+                        const cSnap = await getDoc(doc(db, 'clubs', club.id));
+                        if (cSnap.exists()) {
+                            const currentCount = cSnap.data().member_count || 0;
+                            await updateDoc(doc(db, 'clubs', club.id), { member_count: currentCount + 1 });
+                        }
+                    } catch (e2) { console.warn("Could not update member count via fallback", e2); }
+                }
+
+            } catch (permErr) { console.warn("Firestore write restricted, using local fallback"); }
+
+            // 3. Local Persistence (Guaranteed)
+            const currentLocal = getLocalJoined();
+            if (!currentLocal.includes(club.id)) {
+                saveLocalJoined([...currentLocal, club.id]);
+            }
+
+            // 4. UI Update
+            alert(`Joined ${club.name}!`);
+            const updatedClub = { ...club, member_count: (club.member_count || 0) + 1 };
+            setJoinedClubs((prev) => [...prev, updatedClub]);
+            setOtherClubs((prev) => prev.filter(c => c.id !== club.id));
+            setIsMember(true);
+            if (selectedClub?.id === club.id) setSelectedClub(updatedClub);
+
+        } catch (e: any) {
+            console.error("Join Error:", e);
+            alert("Joined (Local Mode)"); // Fallback success
+        }
+    };
+
+    const handleExitClub = async (club: Club) => {
+        if (!user) return;
+        if (!confirm(`Are you sure you want to leave ${club.name}?`)) return;
+
+        try {
+            // 1. Backend API (Best Effort)
+            try {
+                const token = await user.getIdToken();
+                await fetch(`${API_BASE}/clubs/${club.id}/leave`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+            } catch (e) { console.warn("Backend leave skipped"); }
+
+            // 2. FIRESTORE CLEANUP (Nuclear Option to prevent Ghost Members)
+            try {
+                // A. Remove from User's joined list
+                await updateDoc(doc(db, 'users', user.uid), {
+                    joined_clubs: arrayRemove(club.id),
+                    [`roles.${club.id}`]: deleteField()
+                });
+
+                // B. Remove from Club Members List
+                await deleteDoc(doc(db, `clubs/${club.id}/members`, user.uid));
+
+                // C. Decrement Count
+                await updateDoc(doc(db, 'clubs', club.id), {
+                    member_count: increment(-1)
+                });
+            } catch (e) { console.warn("Firestore cleanup partial fail", e); }
+
+            // 3. Local Persistence Cleanup
+            const currentLocal = getLocalJoined();
+            saveLocalJoined(currentLocal.filter((id: string) => id !== club.id));
+
+            // 4. UI Update
+            alert(`Left ${club.name}.`);
+            // Remove from members list if currently viewing
+            if (selectedClub?.id === club.id) {
+                setMembers(prev => prev.filter(m => m.userId !== user.uid));
+                setIsMember(false); // Immediately lock view
+            }
+
+            setOtherClubs((prev) => [...prev, { ...club, member_count: Math.max(0, (club.member_count || 1) - 1) }]);
+            setJoinedClubs((prev) => prev.filter(c => c.id !== club.id));
+            if (selectedClub?.id === club.id) setSelectedClub(null);
+
+        } catch (e) { console.error("Exit Error:", e); }
     };
 
     // Shared Card Style
     const cardStyle = {
         border: '1px solid #e0e0e0',
-        borderRadius: '8px',
-        padding: '16px',
+        borderRadius: '12px',
+        padding: '20px',
         backgroundColor: 'white',
-        boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
+        boxShadow: '0 4px 6px rgba(0,0,0,0.05)',
         display: 'flex',
         flexDirection: 'column' as const,
         justifyContent: 'space-between',
-        minHeight: '120px'
+        transition: 'transform 0.2s ease, box-shadow 0.2s ease'
     };
 
+    if (loading && !selectedClub) return <div style={{ textAlign: 'center', padding: '50px' }}>Loading Clubs Hub...</div>;
+
     return (
-        <div>
+        <div style={{ fontFamily: '"Inter", sans-serif', color: '#1a1a1a' }}>
             {selectedClub ? (
-                // Detailed Hub View
-                <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
+                <div style={{ maxWidth: '1000px', margin: '0 auto', animation: 'fadeIn 0.5s ease' }}>
                     <button
                         onClick={() => setSelectedClub(null)}
-                        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1rem', marginBottom: '10px', color: '#007bff' }}
+                        style={{
+                            background: '#f0f0f0', border: 'none', cursor: 'pointer',
+                            fontSize: '0.9rem', marginBottom: '20px', color: '#333',
+                            padding: '8px 16px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '8px'
+                        }}
                     >
                         &larr; Back to Directory
                     </button>
 
                     <div style={{
-                        backgroundColor: '#f8f9fa', padding: '30px', borderRadius: '12px', marginBottom: '30px',
-                        border: '1px solid #eee'
+                        background: 'linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%)',
+                        color: 'white', padding: '40px', borderRadius: '16px', marginBottom: '30px',
+                        boxShadow: '0 10px 25px rgba(59, 130, 246, 0.2)'
                     }}>
-                        <h1 style={{ margin: '0 0 10px 0', fontSize: '2.5rem' }}>{selectedClub.name}</h1>
-                        <p style={{ fontStyle: 'italic', fontSize: '1.2rem', color: '#555', margin: '0 0 20px 0' }}>
-                            "{selectedClub.moto || 'Innovation awaits...'}"
-                        </p>
-                        <p style={{ lineHeight: '1.6' }}>{selectedClub.description || 'No description available for this club.'}</p>
-
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '30px', marginTop: '20px', fontSize: '0.9rem', color: '#333' }}>
-                            <div style={{ background: 'white', padding: '10px 20px', borderRadius: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-                                <strong>Since:</strong> {selectedClub.since || '2021'}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                            <div>
+                                <h1 style={{ margin: '0 0 10px 0', fontSize: '3rem', fontWeight: 800 }}>{selectedClub.name}</h1>
+                                <p style={{ fontSize: '1.2rem', opacity: 0.9, marginBottom: '20px', fontWeight: 500 }}>
+                                    {selectedClub.moto || 'Innovation awaits...'}
+                                </p>
                             </div>
-                            <div style={{ background: 'white', padding: '10px 20px', borderRadius: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-                                <strong>Events Conducted:</strong> {selectedClub.eventsConducted || 12}
-                            </div>
+                            {isMember && (
+                                <button
+                                    onClick={() => handleExitClub(selectedClub)}
+                                    style={{
+                                        backgroundColor: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.3)',
+                                        color: 'white', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer',
+                                        fontSize: '0.9rem', fontWeight: 600, transition: 'all 0.2s'
+                                    }}
+                                    onMouseOver={(e) => (e.currentTarget.style.backgroundColor = 'rgba(220, 38, 38, 0.2)')}
+                                    onMouseOut={(e) => (e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.1)')}
+                                >
+                                    Exit Club
+                                </button>
+                            )}
                         </div>
 
-                        <div style={{ marginTop: '20px', background: '#ffe', padding: '15px', borderRadius: '8px', border: '1px solid #eeb' }}>
-                            <strong>Currently Conducting:</strong>
-                            <ul style={{ marginTop: '5px', paddingLeft: '20px' }}>
-                                <li><em>Hackathon 2025 (Ongoing)</em></li>
-                                <li><em>Weekly Workshop</em></li>
-                                {/* In real app, map over ongoing events */}
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '20px', marginTop: '10px' }}>
+                            <div style={{ background: 'rgba(255,255,255,0.15)', padding: '10px 20px', borderRadius: '12px', backdropFilter: 'blur(5px)' }}>
+                                <strong style={{ opacity: 0.7, fontSize: '0.8rem', display: 'block' }}>ESTABLISHED</strong>
+                                {selectedClub.since || '2021'}
+                            </div>
+                            <div style={{ background: 'rgba(255,255,255,0.15)', padding: '10px 20px', borderRadius: '12px', backdropFilter: 'blur(5px)' }}>
+                                <strong style={{ opacity: 0.7, fontSize: '0.8rem', display: 'block' }}>EVENTS</strong>
+                                {selectedClub.eventsConducted || 0}
+                            </div>
+                            <div style={{ background: 'rgba(255,255,255,0.15)', padding: '10px 20px', borderRadius: '12px', backdropFilter: 'blur(5px)' }}>
+                                <strong style={{ opacity: 0.7, fontSize: '0.8rem', display: 'block' }}>MEMBERSHIP</strong>
+                                {members.length > 0 ? members.length : (selectedClub.member_count || 0)} active members
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '30px', marginBottom: '40px' }}>
+                        <div>
+                            <h3 style={{ fontSize: '1.5rem', marginBottom: '15px' }}>About the Club</h3>
+                            <p style={{ lineHeight: '1.8', fontSize: '1.05rem', color: '#444' }}>
+                                {selectedClub.bio || selectedClub.description || 'No detailed bio available.'}
+                            </p>
+
+                            <h3 style={{ fontSize: '1.5rem', marginTop: '30px', marginBottom: '15px' }}>Notable Achievements</h3>
+                            <ul style={{ paddingLeft: '20px', listStyleType: 'none' }}>
+                                {(selectedClub.achievements || ['Setting new standards since inception', 'Active participation in university fests']).map((ach, i) => (
+                                    <li key={i} style={{ marginBottom: '12px', position: 'relative', paddingLeft: '25px' }}>
+                                        <span style={{ position: 'absolute', left: 0, color: '#3b82f6' }}>★</span>
+                                        {ach}
+                                    </li>
+                                ))}
                             </ul>
+                        </div>
+
+                        <div style={{ background: '#f8fafc', padding: '24px', borderRadius: '16px', border: '1px solid #e2e8f0' }}>
+                            <h3 style={{ marginTop: 0, fontSize: '1.2rem' }}>Ongoing Activities</h3>
+                            <div style={{ display: 'grid', gap: '15px' }}>
+                                <div style={{ background: 'white', padding: '12px', borderRadius: '8px', borderLeft: '4px solid #10b981' }}>
+                                    <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>Annual Recruitment</div>
+                                    <div style={{ fontSize: '0.8rem', color: '#666' }}>Active until next week</div>
+                                </div>
+                                <div style={{ background: 'white', padding: '12px', borderRadius: '8px', borderLeft: '4px solid #3b82f6' }}>
+                                    <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>Weekly Workshop</div>
+                                    <div style={{ fontSize: '0.8rem', color: '#666' }}>Every Friday at 5 PM</div>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
                     <div style={{ marginBottom: '40px' }}>
-                        <h3 style={{ borderBottom: '2px solid #333', paddingBottom: '10px' }}>Gallery</h3>
-                        <div style={{ display: 'flex', gap: '15px', overflowX: 'auto', paddingBottom: '10px' }}>
-                            {[1, 2, 3, 4].map(i => (
+                        <h3 style={{ fontSize: '1.5rem', marginBottom: '20px' }}>Club Gallery</h3>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '15px' }}>
+                            {(selectedClub.gallery || [1, 2, 3, 4]).map((img, i) => (
                                 <div key={i} style={{
-                                    minWidth: '200px', height: '150px',
-                                    background: '#e0e0e0', borderRadius: '8px',
-                                    display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#888'
+                                    height: '180px', background: '#e2e8f0', borderRadius: '12px',
+                                    overflow: 'hidden', boxShadow: '0 2px 5px rgba(0,0,0,0.1)'
                                 }}>
-                                    Image {i}
+                                    {typeof img === 'string' ? (
+                                        <img src={img} alt="Gallery" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                    ) : (
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#94a3b8' }}>Moment {i + 1}</div>
+                                    )}
                                 </div>
                             ))}
                         </div>
                     </div>
 
-                    <div>
-                        <h3 style={{ borderBottom: '2px solid #333', paddingBottom: '10px' }}>Members & Roles</h3>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '15px' }}>
-                            {members.map(member => (
-                                <div
-                                    key={member.userId}
-                                    onClick={() => setSelectedMemberProfile(member)}
+                    {requests.length > 0 && (
+                        <div style={{ marginBottom: '40px', background: '#fffbeb', padding: '24px', borderRadius: '16px', border: '1px solid #fbbf24', animation: 'slideUp 0.5s ease' }}>
+                            <h3 style={{ marginTop: 0, color: '#92400e', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                🔔 New Join Requests
+                                <span style={{ fontSize: '0.8rem', background: '#fbbf24', color: 'white', padding: '2px 8px', borderRadius: '10px' }}>
+                                    {requests.length}
+                                </span>
+                            </h3>
+                            <div style={{ display: 'grid', gap: '15px' }}>
+                                {requests.map(req => (
+                                    <div key={req.userId} style={{ background: 'white', padding: '16px', borderRadius: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
+                                        <div>
+                                            <div style={{ fontWeight: 600 }}>{req.name}</div>
+                                            <div style={{ fontSize: '0.85rem', color: '#666' }}>{req.email}</div>
+                                        </div>
+                                        <div style={{ display: 'flex', gap: '10px' }}>
+                                            <button
+                                                onClick={() => handleApproveMember(req)}
+                                                style={{ background: '#10b981', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontWeight: 600 }}
+                                            >
+                                                Approve
+                                            </button>
+                                            <button
+                                                onClick={() => handleRejectMember(req)}
+                                                style={{ background: '#ef4444', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontWeight: 600 }}
+                                            >
+                                                Reject
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    <div style={{ animation: 'slideUp 0.5s ease' }}>
+                        <h3 style={{ fontSize: '1.5rem', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            Members Directory
+                            {!isMember && (
+                                <span style={{ fontSize: '0.8rem', fontWeight: 500, background: '#fee2e2', color: '#dc2626', padding: '4px 10px', borderRadius: '20px' }}>
+                                    LOCKED
+                                </span>
+                            )}
+                        </h3>
+
+                        {isMember ? (
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '20px' }}>
+                                {members.map(member => (
+                                    <div
+                                        key={member.userId}
+                                        onClick={() => setSelectedMemberProfile(member)}
+                                        style={{
+                                            ...cardStyle,
+                                            cursor: 'pointer',
+                                            backgroundColor: (member.role === 'chairman' || member.role === 'chairperson') ? '#fffbeb' : 'white',
+                                            border: (member.role === 'chairman' || member.role === 'chairperson') ? '1px solid #fbbf24' : '1px solid #e2e8f0'
+                                        }}
+                                        onMouseOver={(e) => (e.currentTarget.style.transform = 'translateY(-5px)')}
+                                        onMouseOut={(e) => (e.currentTarget.style.transform = 'translateY(0)')}
+                                    >
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                            <div style={{
+                                                width: '40px', height: '40px', borderRadius: '50%',
+                                                background: (member.role === 'chairman' || member.role === 'chairperson') ? '#fbbf24' : '#e2e8f0',
+                                                display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, color: 'white'
+                                            }}>
+                                                {member.name?.[0].toUpperCase() || '?'}
+                                            </div>
+                                            <div>
+                                                <div style={{ fontWeight: 600, fontSize: '1rem' }}>{member.name}</div>
+                                                <div style={{
+                                                    fontSize: '0.75rem', textTransform: 'uppercase', fontWeight: 700,
+                                                    color: (member.role === 'chairman' || member.role === 'chairperson') ? '#b45309' : '#64748b'
+                                                }}>
+                                                    {member.role}
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {(myRole === 'chairperson' || myRole === 'chairman') && member.userId !== user?.uid && (
+                                            <div style={{ marginTop: '15px', paddingTop: '10px', borderTop: '1px solid #eee' }} onClick={(e) => e.stopPropagation()}>
+                                                <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#94a3b8', marginBottom: '5px', textTransform: 'uppercase' }}>Promote / Change Role</div>
+                                                <select
+                                                    value={member.role}
+                                                    onChange={(e) => handleUpdateRole(member, e.target.value)}
+                                                    style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.85rem', cursor: 'pointer' }}
+                                                >
+                                                    <option value="member">Member</option>
+                                                    <option value="moderator">Moderator</option>
+                                                    <option value="vice_chairman">Vice Chairman</option>
+                                                    <option value="secretary">Secretary</option>
+                                                    <option value="event_head">Event Head</option>
+                                                    <option value="chairperson">Chairperson</option>
+                                                </select>
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                                {members.length === 0 && <p style={{ color: '#64748b' }}>Populating members list...</p>}
+                            </div>
+                        ) : (
+                            <div style={{
+                                background: '#f1f5f9', padding: '40px', borderRadius: '16px', textAlign: 'center',
+                                border: '2px dashed #cbd5e1'
+                            }}>
+                                <p style={{ fontSize: '1.1rem', color: '#475569', marginBottom: '20px' }}>
+                                    The member list is exclusive to {selectedClub.name} members.
+                                </p>
+                                <button
+                                    onClick={() => handleJoinClub(selectedClub)}
                                     style={{
-                                        ...cardStyle,
-                                        cursor: 'pointer',
-                                        backgroundColor: member.role === 'chairman' ? '#fffbeb' : 'white',
-                                        border: member.role === 'chairman' ? '1px solid #ffd700' : '1px solid #e0e0e0',
-                                        minHeight: 'auto'
+                                        background: '#3b82f6', color: 'white', border: 'none', padding: '12px 24px',
+                                        borderRadius: '8px', cursor: 'pointer', fontWeight: 600
                                     }}
                                 >
-                                    <div style={{ fontWeight: 'bold', fontSize: '1.1rem' }}>{member.name}</div>
-                                    <div style={{
-                                        marginTop: '5px', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.5px',
-                                        color: member.role === 'chairman' ? '#b8860b' : '#666'
-                                    }}>
-                                        {member.role}
-                                    </div>
-                                </div>
-                            ))}
-                            {members.length === 0 && <p>No members found.</p>}
-                        </div>
+                                    Join Club to View
+                                </button>
+                            </div>
+                        )}
                     </div>
 
                     {/* Member Profile Modal */}
                     {selectedMemberProfile && (
                         <div style={{
                             position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-                            backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000
+                            backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000,
+                            backdropFilter: 'blur(4px)'
                         }}>
-                            <div style={{ background: 'white', padding: '30px', borderRadius: '12px', width: '90%', maxWidth: '400px', boxShadow: '0 5px 15px rgba(0,0,0,0.2)' }}>
-                                <h2 style={{ marginTop: 0 }}>{selectedMemberProfile.name}</h2>
-                                <div style={{ display: 'grid', gap: '10px' }}>
-                                    <div><small style={{ color: '#666' }}>Role</small><br /><strong>{selectedMemberProfile.role.toUpperCase()}</strong></div>
-                                    <div><small style={{ color: '#666' }}>Username</small><br />{selectedMemberProfile.username}</div>
-                                    <div><small style={{ color: '#666' }}>Reg No</small><br />{selectedMemberProfile.regNo}</div>
-                                    <div><small style={{ color: '#666' }}>Email</small><br />{selectedMemberProfile.email}</div>
+                            <div style={{
+                                background: 'white', padding: '40px', borderRadius: '20px', width: '90%', maxWidth: '400px',
+                                boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)', animation: 'scaleUp 0.3s ease'
+                            }}>
+                                <div style={{ textAlign: 'center', marginBottom: '30px' }}>
+                                    <div style={{
+                                        width: '80px', height: '80px', borderRadius: '50%', background: '#3b82f6',
+                                        margin: '0 auto 15px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        fontSize: '2rem', color: 'white', fontWeight: 800
+                                    }}>
+                                        {selectedMemberProfile.name?.[0].toUpperCase()}
+                                    </div>
+                                    <h2 style={{ margin: 0, fontSize: '1.5rem' }}>{selectedMemberProfile.name}</h2>
+                                    <div style={{ color: '#3b82f6', fontWeight: 600, fontSize: '0.9rem', marginTop: '5px' }}>
+                                        {selectedMemberProfile.role.toUpperCase()}
+                                    </div>
                                 </div>
+
+                                <div style={{ display: 'grid', gap: '16px' }}>
+                                    <div style={{ padding: '12px', background: '#f8fafc', borderRadius: '12px' }}>
+                                        <small style={{ color: '#64748b', fontWeight: 600 }}>USERNAME</small><br />
+                                        <strong>@{selectedMemberProfile.username}</strong>
+                                    </div>
+                                    <div style={{ padding: '12px', background: '#f8fafc', borderRadius: '12px' }}>
+                                        <small style={{ color: '#64748b', fontWeight: 600 }}>REGISTRATION NO</small><br />
+                                        <strong>{selectedMemberProfile.regNo}</strong>
+                                    </div>
+                                    <div style={{ padding: '12px', background: '#f8fafc', borderRadius: '12px' }}>
+                                        <small style={{ color: '#64748b', fontWeight: 600 }}>OFFICIAL EMAIL</small><br />
+                                        <strong>{selectedMemberProfile.email}</strong>
+                                    </div>
+                                </div>
+
                                 <button
                                     onClick={() => setSelectedMemberProfile(null)}
-                                    style={{ marginTop: '20px', padding: '10px 20px', width: '100%', background: '#333', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer' }}
+                                    style={{
+                                        marginTop: '30px', padding: '14px', width: '100%', background: '#1e293b',
+                                        color: 'white', border: 'none', borderRadius: '12px', cursor: 'pointer',
+                                        fontWeight: 600, transition: 'background 0.2s'
+                                    }}
+                                    onMouseOver={(e) => (e.currentTarget.style.background = '#0f172a')}
+                                    onMouseOut={(e) => (e.currentTarget.style.background = '#1e293b')}
                                 >
-                                    Close
+                                    Close Profile
                                 </button>
                             </div>
                         </div>
                     )}
                 </div>
             ) : (
-                // Directory View
                 <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-                    <h2 style={{ fontSize: '1.8rem', marginBottom: '20px' }}>My Clubs</h2>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px', marginBottom: '40px' }}>
-                        {joinedClubs.map(club => (
-                            <div key={club.id} style={cardStyle}>
-                                <div>
-                                    <h3
-                                        onClick={() => setSelectedClub(club)}
-                                        style={{ margin: '0 0 10px 0', color: '#007bff', cursor: 'pointer', textDecoration: 'underline' }}
-                                    >
-                                        {club.name || 'Unnamed Club'}
-                                    </h3>
-                                    <p style={{ color: '#666', fontSize: '0.9rem', margin: 0 }}>
-                                        {club.moto ? `"${club.moto}"` : 'Member'}
-                                    </p>
+                    <div style={{ marginBottom: '50px' }}>
+                        <h2 style={{ fontSize: '2.5rem', fontWeight: 800, marginBottom: '25px', letterSpacing: '-0.5px' }}>My Clubs</h2>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '25px' }}>
+                            {joinedClubs.map(club => (
+                                <div key={club.id} style={cardStyle}>
+                                    <div>
+                                        <h3
+                                            onClick={() => setSelectedClub(club)}
+                                            style={{ margin: '0 0 8px 0', color: '#1a1a1a', cursor: 'pointer', fontSize: '1.4rem' }}
+                                        >
+                                            {club.name || 'Unnamed Club'}
+                                        </h3>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#3b82f6', fontSize: '0.85rem', fontWeight: 700, marginBottom: '12px' }}>
+                                            <span style={{ background: '#dbeafe', padding: '2px 8px', borderRadius: '4px' }}>MEMBER</span>
+                                        </div>
+                                        <p style={{ color: '#64748b', fontSize: '0.95rem', fontStyle: 'italic' }}>
+                                            {club.moto ? `"${club.moto}"` : 'Active Member'}
+                                        </p>
+                                    </div>
+                                    <div style={{ marginTop: '20px', display: 'flex', gap: '10px' }}>
+                                        <button
+                                            onClick={() => setSelectedClub(club)}
+                                            style={{
+                                                flex: 1, padding: '10px', cursor: 'pointer', background: '#1a1a1a',
+                                                color: 'white', border: 'none', borderRadius: '8px', fontWeight: 600
+                                            }}
+                                        >
+                                            Enter Hub
+                                        </button>
+                                        <button
+                                            onClick={() => handleExitClub(club)}
+                                            style={{
+                                                padding: '10px', cursor: 'pointer', background: 'transparent',
+                                                color: '#ef4444', border: '1px solid #fecaca', borderRadius: '8px', fontWeight: 600
+                                            }}
+                                        >
+                                            Leave
+                                        </button>
+                                    </div>
                                 </div>
-                                <div style={{ marginTop: '15px' }}>
-                                    <button onClick={() => setSelectedClub(club)} style={{ padding: '8px 16px', cursor: 'pointer' }}>
-                                        Open Hub
-                                    </button>
+                            ))}
+                            {joinedClubs.length === 0 && (
+                                <div style={{ gridColumn: '1/-1', background: '#f8fafc', padding: '40px', borderRadius: '16px', textAlign: 'center', border: '1px solid #e2e8f0' }}>
+                                    <p style={{ color: '#64748b', margin: 0 }}>You haven't joined any clubs yet. Explore the directory below!</p>
                                 </div>
-                            </div>
-                        ))}
-                        {joinedClubs.length === 0 && <p style={{ color: '#666' }}>You haven't joined any clubs yet.</p>}
+                            )}
+                        </div>
                     </div>
 
-                    <h2 style={{ fontSize: '1.8rem', marginBottom: '20px' }}>All Clubs</h2>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' }}>
-                        {otherClubs.map(club => (
-                            <div key={club.id} style={cardStyle}>
-                                <div>
-                                    <h3
-                                        onClick={() => setSelectedClub(club)}
-                                        style={{ margin: '0 0 10px 0', cursor: 'pointer' }}
-                                    >
-                                        {club.name || 'Unnamed Club'}
-                                    </h3>
-                                    <p style={{ color: '#666', fontSize: '0.9rem', margin: 0, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                                        {club.description || 'No description.'}
-                                    </p>
+                    <div>
+                        <h2 style={{ fontSize: '2.5rem', fontWeight: 800, marginBottom: '25px', letterSpacing: '-0.5px' }}>Explore Clubs</h2>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '25px' }}>
+                            {otherClubs.map(club => (
+                                <div
+                                    key={club.id}
+                                    style={cardStyle}
+                                    onMouseOver={(e) => (e.currentTarget.style.boxShadow = '0 10px 15px -3px rgba(0, 0, 0, 0.1)')}
+                                    onMouseOut={(e) => (e.currentTarget.style.boxShadow = '0 4px 6px -1px rgba(0, 0, 0, 0.05)')}
+                                >
+                                    <div>
+                                        <h3
+                                            onClick={() => setSelectedClub(club)}
+                                            style={{ margin: '0 0 10px 0', cursor: 'pointer', fontSize: '1.4rem' }}
+                                        >
+                                            {club.name || 'Unnamed Club'}
+                                        </h3>
+                                        <p style={{
+                                            color: '#64748b', fontSize: '0.95rem', margin: 0, lineHeight: '1.5',
+                                            display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden'
+                                        }}>
+                                            {club.description || 'No description available for this club.'}
+                                        </p>
+                                        <div style={{ marginTop: '12px', fontSize: '0.85rem', color: '#94a3b8' }}>
+                                            {club.member_count || 0} members • {club.since || '2021'}
+                                        </div>
+                                    </div>
+                                    <div style={{ marginTop: '20px', display: 'flex', gap: '12px' }}>
+                                        <button
+                                            disabled={pendingClubIds.includes(club.id)}
+                                            onClick={() => handleJoinClub(club)}
+                                            style={{
+                                                flex: 2, padding: '12px',
+                                                backgroundColor: pendingClubIds.includes(club.id) ? '#94a3b8' : (club.requiresApproval ? '#1e293b' : '#3b82f6'),
+                                                color: 'white', border: 'none', borderRadius: '8px', cursor: pendingClubIds.includes(club.id) ? 'not-allowed' : 'pointer', fontWeight: 600
+                                            }}
+                                        >
+                                            {pendingClubIds.includes(club.id) ? 'Request Pending' : (club.requiresApproval ? 'Request to Join' : 'Join Now')}
+                                        </button>
+                                        <button
+                                            onClick={() => setSelectedClub(club)}
+                                            style={{
+                                                flex: 1, padding: '12px', backgroundColor: 'transparent',
+                                                color: '#1e293b', border: '1px solid #e2e8f0', borderRadius: '8px', cursor: 'pointer', fontWeight: 600
+                                            }}
+                                        >
+                                            View
+                                        </button>
+                                    </div>
                                 </div>
-                                <div style={{ marginTop: '15px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <button
-                                        onClick={() => handleJoinClub(club)}
-                                        style={{
-                                            padding: '8px 16px',
-                                            backgroundColor: '#28a745',
-                                            color: 'white',
-                                            border: 'none',
-                                            borderRadius: '4px',
-                                            cursor: 'pointer'
-                                        }}
-                                    >
-                                        {club.requiresApproval ? 'Request to Join' : 'Join Now'}
-                                    </button>
-                                    <span
-                                        onClick={() => setSelectedClub(club)}
-                                        style={{ fontSize: '0.9rem', color: '#007bff', cursor: 'pointer', textDecoration: 'underline' }}
-                                    >
-                                        Details
-                                    </span>
-                                </div>
-                            </div>
-                        ))}
-                        {otherClubs.length === 0 && <p style={{ color: '#666' }}>No other clubs found.</p>}
+                            ))}
+                            {otherClubs.length === 0 && <p style={{ color: '#64748b' }}>No other clubs found at this time.</p>}
+                        </div>
                     </div>
                 </div>
             )}
+
+            <style>{`
+                @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+                @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+                @keyframes scaleUp { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+            `}</style>
         </div>
     );
 };

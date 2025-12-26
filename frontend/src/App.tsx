@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './AuthContext';
 import Login from './components/Login';
 import SignUp from './components/SignUp';
@@ -9,13 +9,34 @@ import Clubs from './components/Clubs';
 import Feed from './components/Feed';
 import Profile from './components/Profile';
 import GlobalShell from './components/GlobalShell';
+import ProfileSetup from './components/ProfileSetup';
+import { db } from './firebaseConfig';
+import { doc, onSnapshot } from 'firebase/firestore';
 import './App.css';
 
 const AppContent = () => {
-  const { user, loading } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const [currentView, setView] = useState('discover');
+  const [profileComplete, setProfileComplete] = useState<boolean | null>(null);
 
-  if (loading) return <div>Loading...</div>;
+  useEffect(() => {
+    if (user) {
+      const unsub = onSnapshot(doc(db, 'users', user.uid), (d) => {
+        // Check if doc exists and has the flag. 
+        // Note: verifyToken backend middleware might create a Doc without isProfileComplete.
+        if (d.exists() && d.data().isProfileComplete) {
+          setProfileComplete(true);
+        } else {
+          setProfileComplete(false);
+        }
+      });
+      return () => unsub();
+    } else {
+      setProfileComplete(null);
+    }
+  }, [user]);
+
+  if (authLoading) return <div>Loading...</div>;
 
   if (!user) {
     return (
@@ -29,6 +50,13 @@ const AppContent = () => {
       </div>
     );
   }
+
+  if (profileComplete === false) {
+    return <ProfileSetup user={user} onComplete={() => { }} />;
+  }
+
+  // Optional: show loading while checking profile
+  if (profileComplete === null) return <div>Loading Profile...</div>;
 
   return (
     <GlobalShell setView={setView} currentView={currentView}>

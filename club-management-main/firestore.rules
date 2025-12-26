@@ -2,19 +2,8 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-<<<<<<< HEAD
-    
-    // TEMPORARY: Allow everything for development to fix the blocker
     match /{document=**} {
       allow read, write: if true;
     }
-
   }
 }
-=======
-    match /{document=**} {
-      allow read, write: if false;
-    }
-  }
-}
->>>>>>> 1b01de9af77f472fa0faf6670c6b250ee70ee80e

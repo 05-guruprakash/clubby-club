@@ -45,7 +45,7 @@ const AdminTools = () => {
             if (!token) throw new Error("Authentication failed. Please log in again.");
 
             console.log("Step 2: Sending request to backend center...");
-            const response = await fetch('http://localhost:3000/events/official', {
+            const response = await fetch('http://localhost:3001/events/official', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

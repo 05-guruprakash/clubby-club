@@ -1,5 +1,5 @@
 import { useState, type ChangeEvent, type FormEvent } from 'react';
-import { createUserWithEmailAndPassword } from 'firebase/auth';
+import { createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { setDoc, doc } from 'firebase/firestore';
 import { auth, db } from '../firebaseConfig';
 
@@ -18,6 +18,16 @@ const SignUp = () => {
         password: '' // New entry for form handling
     });
     const [error, setError] = useState<string | null>(null);
+
+    const handleGoogleSignUp = async () => {
+        try {
+            const provider = new GoogleAuthProvider();
+            await signInWithPopup(auth, provider);
+            // The AuthContext in App.tsx will detect the change and render ProfileSetup if needed
+        } catch (err: any) {
+            setError(err.message);
+        }
+    };
 
     const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
         setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -69,6 +79,8 @@ const SignUp = () => {
     return (
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxWidth: '300px' }}>
             <h3>Sign Up (NEXUS)</h3>
+            <button type="button" onClick={handleGoogleSignUp} style={{ background: '#4285F4', color: 'white', marginBottom: '10px' }}>Sign up with Google</button>
+            <div style={{ textAlign: 'center' }}>OR</div>
             {/* 9 Fields + Password */}
             <input name="username" placeholder="Username" onChange={handleChange} required />
             <input name="firstName" placeholder="First Name" onChange={handleChange} required />

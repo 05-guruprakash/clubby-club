@@ -14,9 +14,15 @@ const GlobalShell: FC<GlobalShellProps> = ({ children, setView, currentView }) =
 
     useEffect(() => {
         const q = query(collection(db, 'notifications'), where('read', '==', false));
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            setUnreadCount(snapshot.size);
-        });
+        const unsubscribe = onSnapshot(q,
+            (snapshot) => {
+                setUnreadCount(snapshot.size);
+            },
+            (error) => {
+                console.warn("Notifications listener blocked by permissions:", error.message);
+                setUnreadCount(0);
+            }
+        );
         return () => unsubscribe();
     }, []);
 

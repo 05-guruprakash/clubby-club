@@ -129,7 +129,8 @@ const ChatRoom: FC<ChatRoomProps> = ({ communityId, type }) => {
 
     const getRoleData = (role?: string) => {
         switch (role) {
-            case 'chairperson': return { color: 'gold', icon: '👑' };
+            case 'chairperson':
+            case 'chairman': return { color: 'gold', icon: '👑' };
             case 'vice_chairman': return { color: 'silver', icon: '🛡️' };
             case 'secretary': return { color: 'silver', icon: '📝' };
             case 'event_head': return { color: 'lightblue', icon: '⚡' };
