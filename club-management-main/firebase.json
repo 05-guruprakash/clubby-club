@@ -21,7 +21,10 @@
   ],
   "emulators": {
     "functions": {
+<<<<<<< HEAD
       "host": "127.0.0.1",
+=======
+>>>>>>> 1b01de9af77f472fa0faf6670c6b250ee70ee80e
       "port": 5001
     },
     "firestore": {
@@ -29,6 +32,7 @@
       "port": 8090
     },
     "ui": {
+<<<<<<< HEAD
       "enabled": true,
       "host": "127.0.0.1",
       "port": 4000
@@ -44,3 +48,13 @@
     "singleProjectMode": true
   }
 }
+=======
+      "enabled": true
+    },
+    "singleProjectMode": true,
+    "auth": {
+      "port": 9099
+    }
+  }
+}
+>>>>>>> 1b01de9af77f472fa0faf6670c6b250ee70ee80e

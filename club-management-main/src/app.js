@@ -45,6 +45,7 @@ app.use("/events", eventRoutes);
 const postRoutes = require("./routes/posts.routes");
 app.use("/posts", postRoutes);
 
+<<<<<<< HEAD
 const notificationRoutes = require("./routes/notifications.routes");
 app.use("/notifications", notificationRoutes);
 
@@ -55,4 +56,6 @@ const teamChatRoutes = require("./routes/chat.routes");
 app.use("/teams", teamChatRoutes);
 
 
+=======
+>>>>>>> 1b01de9af77f472fa0faf6670c6b250ee70ee80e
 module.exports = app;

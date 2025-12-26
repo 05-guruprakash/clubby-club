@@ -15,7 +15,11 @@ firebase-debug.*.log*
 # Uncomment this if you'd like others to create their own Firebase project.
 # For a team working on the same Firebase project(s), it is recommended to leave
 # it commented so all members can deploy to the same project(s) in .firebaserc.
+<<<<<<< HEAD
 # .firebaserc bruhhhhh
+=======
+# .firebaserc
+>>>>>>> 1b01de9af77f472fa0faf6670c6b250ee70ee80e
 
 # Runtime data
 pids
@@ -46,7 +50,10 @@ build/Release
 
 # Dependency directories
 node_modules/
+<<<<<<< HEAD
 functions/node_modules/
+=======
+>>>>>>> 1b01de9af77f472fa0faf6670c6b250ee70ee80e
 
 # Optional npm cache directory
 .npm
@@ -65,12 +72,15 @@ functions/node_modules/
 
 # dotenv environment variables file
 .env
+<<<<<<< HEAD
 .env.*
 *.env
 
 # OS / Editor files
 .DS_Store
 Thumbs.db
+=======
+>>>>>>> 1b01de9af77f472fa0faf6670c6b250ee70ee80e
 
 # dataconnect generated files
 .dataconnect
