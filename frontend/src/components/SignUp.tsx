@@ -5,17 +5,18 @@ import { auth, db } from '../firebaseConfig';
 
 const SignUp = () => {
     const [formData, setFormData] = useState({
-        username: '', // New
-        firstName: '',
-        lastName: '',
-        regNo: '', // Renamed from studentId
-        year: '',
-        department: '',
-        college: '', // New
-        officialMail: '', // New
-        personalMail: '', // used for auth
+        username: '',
+        fullName: '', // Changed to single Full Name field
+        regNo: '',
+        year: '1st', // Default to 1st
+        department: 'CSE', // Default
+        college: 'Madras Institute of Technology', // Pre-filled
+        officialMail: '',
+        personalMail: '',
         phoneNumber: '',
-        password: '' // New entry for form handling
+        password: '',
+        confirmPassword: '',
+        termsAccepted: false
     });
     const [error, setError] = useState<string | null>(null);
 
@@ -23,21 +24,25 @@ const SignUp = () => {
         try {
             const provider = new GoogleAuthProvider();
             await signInWithPopup(auth, provider);
-            // The AuthContext in App.tsx will detect the change and render ProfileSetup if needed
         } catch (err: any) {
             setError(err.message);
         }
     };
 
-    const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
-        setFormData({ ...formData, [e.target.name]: e.target.value });
+    const handleChange = (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+        const { name, value } = e.target;
+        // @ts-ignore
+        setFormData(prev => ({ ...prev, [name]: value }));
+    };
+
+    const handleCheckboxChange = (e: ChangeEvent<HTMLInputElement>) => {
+        setFormData(prev => ({ ...prev, termsAccepted: e.target.checked }));
     };
 
     const validate = () => {
-        // if (!formData.personalMail.includes('@')) return "Invalid personal email";
-        // if (formData.password.length < 6) return "Password too short";
-        // if (!formData.regNo.trim()) return "Registration Number required";
-        // if (!formData.officialMail.includes('@')) return "Invalid official email";
+        if (formData.password !== formData.confirmPassword) return "Passwords do not match";
+        if (!formData.termsAccepted) return "You must accept the terms and conditions";
+        if (formData.password.length < 6) return "Password must be at least 6 characters";
         return null;
     };
 
@@ -57,17 +62,17 @@ const SignUp = () => {
 
             await setDoc(doc(db, 'users', user.uid), {
                 username: formData.username,
-                firstName: formData.firstName,
-                lastName: formData.lastName,
+                full_name: formData.fullName, // Storing as full_name
                 regNo: formData.regNo,
                 year: formData.year,
                 department: formData.department,
                 college: formData.college,
                 officialMail: formData.officialMail,
                 personalMail: formData.personalMail,
-                phoneNumber: formData.phoneNumber,
-                role: 'user', // Default role for NEXUS
-                joined_clubs: []
+                phone: formData.phoneNumber, // Standardizing to 'phone'
+                role: 'user',
+                joined_clubs: [],
+                createdAt: new Date().toISOString()
             });
 
             alert('User created successfully!');
@@ -76,27 +81,63 @@ const SignUp = () => {
         }
     };
 
+    const inputStyle = {
+        padding: '10px',
+        borderRadius: '6px',
+        border: '1px solid #ccc',
+        fontSize: '0.9rem'
+    };
+
     return (
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxWidth: '300px' }}>
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxWidth: '350px' }}>
             <h3>Sign Up (NEXUS)</h3>
-            <button type="button" onClick={handleGoogleSignUp} style={{ background: '#4285F4', color: 'white', marginBottom: '10px' }}>Sign up with Google</button>
-            <div style={{ textAlign: 'center' }}>OR</div>
-            {/* 9 Fields + Password */}
-            <input name="username" placeholder="Username" onChange={handleChange} required />
-            <input name="firstName" placeholder="First Name" onChange={handleChange} required />
-            <input name="lastName" placeholder="Last Name" onChange={handleChange} required />
-            <input name="regNo" placeholder="Reg No" onChange={handleChange} required />
-            <input name="year" placeholder="Year" onChange={handleChange} required />
-            <input name="department" placeholder="Department" onChange={handleChange} required />
-            <input name="college" placeholder="College" onChange={handleChange} required />
-            <input name="officialMail" type="email" placeholder="Official Mail" onChange={handleChange} required />
-            <input name="personalMail" type="email" placeholder="Personal Mail (Login)" onChange={handleChange} required />
-            <input name="phoneNumber" placeholder="Phone Number" onChange={handleChange} required />
+            <button type="button" onClick={handleGoogleSignUp} style={{ background: '#4285F4', color: 'white', border: 'none', padding: '10px', borderRadius: '6px', cursor: 'pointer', marginBottom: '10px', fontWeight: 'bold' }}>
+                Sign up with Google
+            </button>
+            <div style={{ textAlign: 'center', color: '#666' }}>OR</div>
+            
+            <input name="username" placeholder="Username (Unique)" value={formData.username} onChange={handleChange} required style={inputStyle} />
+            <input name="fullName" placeholder="Full Name" value={formData.fullName} onChange={handleChange} required style={inputStyle} />
+            <input name="regNo" placeholder="Register Number" value={formData.regNo} onChange={handleChange} required style={inputStyle} />
+            
+            <select name="year" value={formData.year} onChange={handleChange} style={inputStyle}>
+                <option value="1st">1st Year</option>
+                <option value="2nd">2nd Year</option>
+                <option value="3rd">3rd Year</option>
+                <option value="4th">4th Year</option>
+            </select>
 
-            <input name="password" type="password" placeholder="Password" onChange={handleChange} required />
+            <select name="department" value={formData.department} onChange={handleChange} style={inputStyle}>
+                <option value="CSE">CSE</option>
+                <option value="ECE">ECE</option>
+                <option value="Mechanical">Mechanical</option>
+                <option value="IT">IT</option>
+                <option value="Aero">Aero</option>
+                <option value="Auto">Auto</option>
+                <option value="EIE">EIE</option>
+                <option value="Prod">Prod</option>
+                <option value="Rubber">Rubber</option>
+                <option value="IBT">IBT</option>
+            </select>
 
-            <button type="submit">Sign Up</button>
-            {error && <div style={{ color: 'red' }}>{error}</div>}
+            <input name="college" placeholder="College Name" value={formData.college} disabled style={{ ...inputStyle, background: '#f0f0f0' }} />
+            <input name="officialMail" type="email" placeholder="College Email ID" value={formData.officialMail} onChange={handleChange} required style={inputStyle} />
+            <input name="personalMail" type="email" placeholder="Personal Email ID" value={formData.personalMail} onChange={handleChange} required style={inputStyle} />
+            <input name="phoneNumber" placeholder="Phone Number" value={formData.phoneNumber} onChange={handleChange} required style={inputStyle} />
+
+            <input name="password" type="password" placeholder="Password" value={formData.password} onChange={handleChange} required style={inputStyle} />
+            {/* Basic Strength Indicator could go here */}
+            <input name="confirmPassword" type="password" placeholder="Confirm Password" value={formData.confirmPassword} onChange={handleChange} required style={inputStyle} />
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.9rem' }}>
+                <input type="checkbox" checked={formData.termsAccepted} onChange={handleCheckboxChange} id="terms" required />
+                <label htmlFor="terms">I accept the <a href="#">Terms and Conditions</a></label>
+            </div>
+
+            <button type="submit" style={{ background: '#646cff', color: 'white', border: 'none', padding: '12px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', marginTop: '10px' }}>
+                Create Account
+            </button>
+            {error && <div style={{ color: 'red', fontSize: '0.9rem', textAlign: 'center' }}>{error}</div>}
         </form>
     );
 };
