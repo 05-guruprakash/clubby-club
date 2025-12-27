@@ -97,4 +97,13 @@ app.use("/posts", postRoutes);
 const teamRoutes = require("./routes/teams.routes");
 app.use("/teams", teamRoutes);
 
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error("🏁 GLOBAL ERROR:", err);
+  res.status(err.status || 500).json({
+    error: err.message || "Internal Server Error",
+    stack: process.env.NODE_ENV === "development" ? err.stack : undefined
+  });
+});
+
 module.exports = app;

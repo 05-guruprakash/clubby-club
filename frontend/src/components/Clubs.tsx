@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { collection, query, where, getDocs, doc, getDoc, setDoc, updateDoc, arrayUnion, deleteDoc, increment, arrayRemove, deleteField } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 import { useAuth } from '../AuthContext';
+import ChatRoom from './ChatRoom';
 
 interface Club {
     id: string;
@@ -597,6 +598,22 @@ const Clubs = () => {
                                 <div style={{ background: 'white', padding: '12px', borderRadius: '8px', borderLeft: '4px solid #3b82f6' }}>
                                     <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>Weekly Workshop</div>
                                     <div style={{ fontSize: '0.8rem', color: '#666' }}>Every Friday at 5 PM</div>
+                                </div>
+                            </div>
+
+                            {/* CLUB COMMUNITY CHAT SECTION */}
+                            <div style={{ marginTop: '30px', background: 'white', padding: '24px', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
+                                <h3 style={{ marginTop: 0, fontSize: '1.2rem', color: '#1e3a8a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <span>💬</span> Club Community Chat
+                                </h3>
+                                <div style={{ height: '500px', overflow: 'hidden', borderRadius: '12px' }}>
+                                    {isMember ? (
+                                        <ChatRoom communityId={selectedClub.id} type="club" />
+                                    ) : (
+                                        <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8fafc', color: '#64748b', textAlign: 'center', padding: '20px' }}>
+                                            Join the club to participate in the conversation!
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>

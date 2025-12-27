@@ -1,8 +1,7 @@
 const express = require("express");
-const admin = require("firebase-admin");
 const { verifyToken } = require("../middleware/auth");
 const { requireRole } = require("../middleware/rbac");
-const { db } = require("../config/firebase");
+const { admin, db } = require("../config/firebase");
 
 const router = express.Router();
 
@@ -181,22 +180,30 @@ router.post("/chat/like", verifyToken, async (req, res) => {
     const userId = req.user.uid;
     const msgRef = db.collection("community_messages").doc(messageId);
 
+    console.log(`✅ [CHAT:LIKE] Processing message ${messageId} for user ${userId}`);
+
     const doc = await msgRef.get();
-    if (!doc.exists) return res.status(404).json({ error: "Message not found" });
+    if (!doc.exists) {
+      console.warn(`❌ [CHAT:LIKE] Message ${messageId} not found`);
+      return res.status(404).json({ error: "Message not found" });
+    }
 
     const currentLikes = doc.data().likes || [];
     if (currentLikes.includes(userId)) {
-      await msgRef.update({
+      await msgRef.set({
         likes: admin.firestore.FieldValue.arrayRemove(userId)
-      });
+      }, { merge: true });
+      console.log(`👍 [CHAT:LIKE] Unliked message ${messageId}`);
     } else {
-      await msgRef.update({
+      await msgRef.set({
         likes: admin.firestore.FieldValue.arrayUnion(userId)
-      });
+      }, { merge: true });
+      console.log(`👍 [CHAT:LIKE] Liked message ${messageId}`);
     }
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(`🔥 [CHAT:LIKE] CRITICAL ERROR:`, err);
+    res.status(500).json({ error: err.message, stack: err.stack });
   }
 });
 
@@ -204,15 +211,23 @@ router.post("/chat/like", verifyToken, async (req, res) => {
 router.post("/chat/comment", verifyToken, async (req, res) => {
   try {
     const { messageId, comment } = req.body;
-    // comment is expected to be the full Comment object
+    console.log(`✅ [CHAT:COMMENT] Adding comment to message ${messageId}`);
+
+    if (!messageId || !comment) {
+      return res.status(400).json({ error: "Missing messageId or comment" });
+    }
+
     const msgRef = db.collection("community_messages").doc(messageId);
 
-    await msgRef.update({
+    await msgRef.set({
       comments: admin.firestore.FieldValue.arrayUnion(comment)
-    });
+    }, { merge: true });
+
+    console.log(`💬 [CHAT:COMMENT] Comment added successfully`);
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(`🔥 [CHAT:COMMENT] CRITICAL ERROR:`, err);
+    res.status(500).json({ error: err.message, stack: err.stack });
   }
 });
 

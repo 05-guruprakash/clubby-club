@@ -1,30 +1,15 @@
 import { useState, useEffect } from 'react';
-import { collection, query, where, getDocs, doc, getDoc, updateDoc, arrayUnion, increment, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, getDoc, updateDoc, deleteDoc, arrayUnion, increment } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 import { useAuth } from '../AuthContext';
 import ChatRoom from './ChatRoom';
 
-interface Post {
-    id: string;
-    content: string;
-    authorName: string;
-    authorRole: string;
-    type: 'event' | 'club';
-    communityName?: string;
-    timestamp?: string;
-}
-
 interface Team {
     id: string;
     name: string;
-    members?: string[];
+    members?: string[]; // Array of UIDs
     eventId: string;
     leaderId: string;
-}
-
-interface Club {
-    id: string;
-    name: string;
 }
 
 interface TeamMember {
@@ -36,286 +21,442 @@ interface TeamMember {
 const Feed = () => {
     const { user } = useAuth();
     const [tab, setTab] = useState<'events' | 'team' | 'club'>('events');
-    const [posts, setPosts] = useState<Post[]>([]);
-
-    // Team States
     const [myTeams, setMyTeams] = useState<Team[]>([]);
     const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
     const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
-    const [teamRequests, setTeamRequests] = useState<any[]>([]);
+    const [requests, setRequests] = useState<any[]>([]);
     const [currentEventName, setCurrentEventName] = useState('');
-
-    // Club States
-    const [joinedClubs, setJoinedClubs] = useState<Club[]>([]);
-    const [selectedClubId, setSelectedClubId] = useState<string | null>(null);
+    const [selectedEventTab, setSelectedEventTab] = useState<'all' | string>('all');
+    const [joinedEvents, setJoinedEvents] = useState<{ id: string, title: string }[]>([]);
 
     useEffect(() => {
         if (!user) return;
 
-        const qTeams = query(collection(db, 'teams'), where('members', 'array-contains', user.uid));
-        const unsubTeams = onSnapshot(qTeams, (snap) => {
-            setMyTeams(snap.docs.map(d => ({ id: d.id, ...d.data() } as Team)));
-        });
+        const loadFeed = async () => {
+            try {
+                // Fetch Events
+                const eventsSnap = await getDocs(collection(db, 'events'));
+                const activeEventIds = new Set(eventsSnap.docs.filter(d => d.data().status !== 'completed').map(d => d.id));
 
-        const unsubUser = onSnapshot(doc(db, 'users', user.uid), async (snap) => {
-            if (snap.exists()) {
-                const clubIds = snap.data().joined_clubs || [];
-                if (clubIds.length > 0) {
-                    const clubPromises = clubIds.map((id: string) => getDoc(doc(db, 'clubs', id)));
-                    const clubSnaps = await Promise.all(clubPromises);
-                    setJoinedClubs(clubSnaps.filter(s => s.exists()).map(s => ({ id: s.id, name: s.data()?.name || 'Unnamed' } as Club)));
-                } else {
-                    setJoinedClubs([]);
+                // Fetch Teams
+                const qLeader = query(collection(db, 'teams'), where('leaderId', '==', user.uid));
+                const snapLeader = await getDocs(qLeader);
+                const qMember = query(collection(db, 'teams'), where('members', 'array-contains', user.uid));
+                const snapMember = await getDocs(qMember);
+
+                const allTeamsMap = new Map();
+                snapLeader.docs.forEach(d => allTeamsMap.set(d.id, { id: d.id, ...d.data() }));
+                snapMember.docs.forEach(d => allTeamsMap.set(d.id, { id: d.id, ...d.data() }));
+
+                const allTeams = Array.from(allTeamsMap.values()) as (Team & { eventId: string })[];
+                setMyTeams(allTeams.filter(t => activeEventIds.has(t.eventId)));
+
+                // Populate Joined Events for specific tabs
+                const joinedEvs: { id: string, title: string }[] = [];
+                for (const team of allTeams) {
+                    if (activeEventIds.has(team.eventId)) {
+                        const evSnap = await getDoc(doc(db, 'events', team.eventId));
+                        if (evSnap.exists() && !joinedEvs.find(e => e.id === team.eventId)) {
+                            joinedEvs.push({ id: team.eventId, title: evSnap.data().title });
+                        }
+                    }
                 }
-            }
-        });
-
-        const qPosts = query(collection(db, 'posts'));
-        const unsubPosts = onSnapshot(qPosts, (snap) => {
-            const realPosts = snap.docs.map(d => ({ id: d.id, ...d.data() } as Post));
-            realPosts.sort((a, b) => {
-                const getT = (val: any) => {
-                    if (!val) return 0;
-                    if (typeof val === 'string') return new Date(val).getTime();
-                    if (val.toDate) return val.toDate().getTime();
-                    if (val.seconds) return val.seconds * 1000;
-                    return 0;
-                };
-                return getT((b as any).timestamp) - getT((a as any).timestamp);
-            });
-            setPosts(realPosts);
-        });
-
-        return () => {
-            unsubTeams();
-            unsubUser();
-            unsubPosts();
+                setJoinedEvents(joinedEvs);
+            } catch (e) { console.error(e); }
         };
-    }, [user]);
+        loadFeed();
+    }, [user, tab]);
+
+    // Fetch Members & Requests
+    useEffect(() => {
+        const fetchDetails = async () => {
+            if (!selectedTeamId || !user) return;
+            const team = myTeams.find(t => t.id === selectedTeamId);
+
+            // 1. Fetch Members
+            if (team && team.members && team.members.length > 0) {
+                try {
+                    const promises = team.members.map(uid => getDoc(doc(db, 'users', uid)));
+                    const docs = await Promise.all(promises);
+                    const membersData = docs.map(d => ({
+                        uid: d.id,
+                        name: d.data()?.username || d.data()?.email || 'Unknown',
+                        role: d.id === (team as any).leaderId ? 'Leader' : 'Member'
+                    }));
+                    setTeamMembers(membersData);
+                } catch (e) { console.error(e); }
+            } else {
+                setTeamMembers([]);
+            }
+
+            // 2. Fetch Requests (If Leader)
+            if (team && team.leaderId === user.uid) {
+                try {
+                    const q = query(collection(db, 'team_members'), where('teamId', '==', selectedTeamId), where('status', '==', 'pending'));
+                    const snap = await getDocs(q);
+                    const reqs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                    setRequests(reqs);
+                } catch (e) { console.error(e); }
+            } else {
+                setRequests([]);
+            }
+        };
+
+        if (tab === 'team' && selectedTeamId) {
+            fetchDetails();
+        }
+    }, [selectedTeamId, myTeams, tab, user]);
 
     useEffect(() => {
-        const fetchTeamDetails = async () => {
-            if (!selectedTeamId || !user) return;
+        const loadEventName = async () => {
+            if (!selectedTeamId) return;
+            const team = myTeams.find(t => t.id === selectedTeamId);
+            if (team) {
+                const ev = await getDoc(doc(db, 'events', team.eventId));
+                setCurrentEventName(ev.data()?.title || '');
+            }
+        };
+        loadEventName();
+    }, [selectedTeamId, myTeams]);
+
+    const handleRemoveMember = async (memberId: string) => {
+        if (!confirm('Remove this member?')) return;
+        try {
             const team = myTeams.find(t => t.id === selectedTeamId);
             if (!team) return;
 
-            if (team.members) {
-                const promises = team.members.map(uid => getDoc(doc(db, 'users', uid)));
-                const docs = await Promise.all(promises);
-                setTeamMembers(docs.map(d => ({
-                    uid: d.id,
-                    name: d.data()?.username || d.data()?.email || 'Unknown',
-                    role: d.id === team.leaderId ? 'Leader' : 'Member'
-                })));
-            }
+            await updateDoc(doc(db, 'teams', team.id), {
+                members: team.members?.filter(m => m !== memberId),
+                current_members: increment(-1)
+            });
 
-            if (team.leaderId === user.uid) {
-                const q = query(collection(db, 'team_members'), where('teamId', '==', selectedTeamId), where('status', '==', 'pending'));
-                const snap = await getDocs(q);
-                setTeamRequests(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-            } else { setTeamRequests([]); }
+            setTeamMembers(prev => prev.filter(m => m.uid !== memberId));
+        } catch (e) { console.error(e); }
+    };
 
-            const ev = await getDoc(doc(db, 'events', team.eventId));
-            setCurrentEventName(ev.data()?.title || 'Event Chat');
-        };
+    const handleDeleteTeam = async () => {
+        if (!confirm('Delete this team entirely? This cannot be undone.')) return;
+        try {
+            if (!selectedTeamId) return;
+            await deleteDoc(doc(db, 'teams', selectedTeamId));
+            setSelectedTeamId(null);
+            setMyTeams(prev => prev.filter(t => t.id !== selectedTeamId));
+        } catch (e) { console.error(e); }
+    };
 
-        if (tab === 'team' && selectedTeamId) fetchTeamDetails();
-    }, [selectedTeamId, myTeams, tab, user]);
-
-    const handleAcceptTeamReq = async (req: any) => {
+    const handleAccept = async (req: any) => {
         try {
             await updateDoc(doc(db, 'team_members', req.id), { status: 'accepted' });
             await updateDoc(doc(db, 'teams', req.teamId), {
                 members: arrayUnion(req.userId),
                 current_members: increment(1)
             });
-            alert("Member accepted!");
-        } catch (e: any) { alert(e.message); }
+            alert("Accepted!");
+            setRequests(prev => prev.filter(r => r.id !== req.id));
+        } catch (e) { console.error(e); }
     };
 
-    const handleDeleteTeam = async () => {
-        if (!confirm('Delete this team?')) return;
+    const handleReject = async (reqId: string) => {
         try {
-            if (!selectedTeamId || !user) return;
-            const token = await user.getIdToken();
-            const response = await fetch(`http://localhost:3001/teams/${selectedTeamId}`, {
-                method: 'DELETE',
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-            if (response.ok) {
-                setSelectedTeamId(null);
-                alert("Team deleted.");
-            } else { alert("Only the leader can delete the team."); }
-        } catch (e: any) { alert(e.message); }
+            await updateDoc(doc(db, 'team_members', reqId), { status: 'rejected' });
+            alert("Rejected.");
+            setRequests(prev => prev.filter(r => r.id !== reqId));
+        } catch (e) { console.error(e); }
     };
-
-    const tabStyle = (active: boolean) => ({
-        padding: '12px 24px',
-        borderRadius: '12px',
-        border: 'none',
-        background: active ? '#1e293b' : 'transparent',
-        color: active ? 'white' : '#64748b',
-        fontWeight: 600,
-        cursor: 'pointer',
-        transition: 'all 0.2s ease',
-        fontSize: '0.95rem'
-    });
 
     return (
-        <div style={{ maxWidth: '1200px', margin: '0 auto', fontFamily: '"Inter", sans-serif' }}>
-            <div style={{ padding: '0 20px' }}>
-                <h2 style={{ fontSize: '2rem', fontWeight: 800, marginBottom: '25px', letterSpacing: '-0.5px' }}>Community Hub</h2>
-
-                <div style={{
-                    display: 'inline-flex', background: '#f1f5f9', padding: '6px',
-                    borderRadius: '16px', marginBottom: '30px'
+        <div style={{ maxWidth: '1400px', margin: '0 auto', color: 'white' }}>
+            {/* Main Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' }}>
+                <h1 style={{
+                    margin: 0,
+                    fontSize: '2.5rem',
+                    fontWeight: 900,
+                    background: 'linear-gradient(135deg, #fff 0%, #aaa 100%)',
+                    WebkitBackgroundClip: 'text',
+                    WebkitTextFillColor: 'transparent'
                 }}>
-                    <button onClick={() => setTab('events')} style={tabStyle(tab === 'events')}>Official Feed</button>
-                    <button onClick={() => setTab('club')} style={tabStyle(tab === 'club')}>Club Chat</button>
-                    <button onClick={() => setTab('team')} style={tabStyle(tab === 'team')}>My Teams</button>
-                </div>
-
-                {tab === 'events' && (
-                    <div style={{ display: 'grid', gap: '20px', animation: 'fadeIn 0.4s ease' }}>
-                        {posts.filter(p => p.type === 'event').map(p => (
-                            <div key={p.id} style={{
-                                background: 'white', border: '1px solid #e2e8f0',
-                                padding: '24px', borderRadius: '16px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)'
-                            }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '15px' }}>
-                                    <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#3b82f6', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.8rem', fontWeight: 700 }}>{p.authorName[0]}</div>
-                                    <div style={{ fontSize: '0.85rem', color: '#64748b' }}>
-                                        <span style={{ fontWeight: 700, color: '#1e293b' }}>{p.communityName || 'Official'}</span> • {p.authorName}
-                                    </div>
-                                </div>
-                                <p style={{ margin: '0 0 15px 0', fontSize: '1.1rem', lineHeight: '1.6', color: '#1a1a1a' }}>{p.content}</p>
-                                <div style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                                    <span>🕒</span> {p.timestamp ? new Date(p.timestamp).toLocaleString() : 'Just now'}
-                                </div>
-                            </div>
-                        ))}
-                        {posts.filter(p => p.type === 'event').length === 0 && (
-                            <div style={{ textAlign: 'center', padding: '60px', color: '#94a3b8' }}>No official announcements yet.</div>
-                        )}
-                    </div>
-                )}
-
-                {tab === 'club' && (
-                    <div style={{ display: 'flex', gap: '30px', height: '70vh', animation: 'fadeIn 0.4s ease' }}>
-                        <div style={{ width: '280px', flexShrink: 0 }}>
-                            <h3 style={{ fontSize: '1rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '15px' }}>Joined Clubs</h3>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                {joinedClubs.map(club => (
-                                    <button
-                                        key={club.id}
-                                        onClick={() => setSelectedClubId(club.id)}
-                                        style={{
-                                            textAlign: 'left', padding: '14px 18px', borderRadius: '12px',
-                                            border: 'none', background: selectedClubId === club.id ? '#3b82f6' : 'white',
-                                            color: selectedClubId === club.id ? 'white' : '#1e293b',
-                                            cursor: 'pointer', fontWeight: 600, boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-                                            transition: 'all 0.2s', borderLeft: selectedClubId === club.id ? 'none' : '4px solid transparent'
-                                        }}
-                                        onMouseOver={(e) => { if (selectedClubId !== club.id) e.currentTarget.style.background = '#f8fafc'; }}
-                                        onMouseOut={(e) => { if (selectedClubId !== club.id) e.currentTarget.style.background = 'white'; }}
-                                    >
-                                        {club.name}
-                                    </button>
-                                ))}
-                                {joinedClubs.length === 0 && (
-                                    <div style={{ padding: '20px', background: '#f8fafc', borderRadius: '12px', textAlign: 'center', border: '1px dashed #cbd5e1' }}>
-                                        <p style={{ fontSize: '0.85rem', color: '#64748b', margin: 0 }}>Join a club to start chatting!</p>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                        <div style={{ flex: 1, position: 'relative' }}>
-                            {selectedClubId ? (
-                                <ChatRoom communityId={selectedClubId} type="club" />
-                            ) : (
-                                <div style={{
-                                    height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center',
-                                    justifyContent: 'center', background: '#f8fafc', borderRadius: '24px', border: '1px solid #e2e8f0'
-                                }}>
-                                    <div style={{ fontSize: '3rem', marginBottom: '10px' }}>💬</div>
-                                    <p style={{ color: '#64748b', fontWeight: 500 }}>Select a club to join the conversation.</p>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                )}
-
-                {tab === 'team' && (
-                    <div style={{ display: 'flex', gap: '30px', height: '70vh', animation: 'fadeIn 0.4s ease' }}>
-                        <div style={{ flex: 3, display: 'flex', flexDirection: 'column' }}>
-                            <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', overflowX: 'auto', paddingBottom: '10px' }}>
-                                {myTeams.map(t => (
-                                    <button
-                                        key={t.id}
-                                        onClick={() => setSelectedTeamId(t.id)}
-                                        style={{
-                                            padding: '10px 20px', borderRadius: '20px', border: 'none',
-                                            background: selectedTeamId === t.id ? '#10b981' : '#f1f5f9',
-                                            color: selectedTeamId === t.id ? 'white' : '#1e293b',
-                                            cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap'
-                                        }}
-                                    >
-                                        {t.name}
-                                    </button>
-                                ))}
-                            </div>
-                            {selectedTeamId ? (
-                                <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                                    <h3 style={{ margin: '0 0 15px 0', fontSize: '1.2rem', color: '#1e293b' }}>{currentEventName}</h3>
-                                    <ChatRoom communityId={selectedTeamId} type="team" />
-                                </div>
-                            ) : (
-                                <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8fafc', borderRadius: '24px' }}>
-                                    <p style={{ color: '#64748b' }}>Select a team to chat with your partners.</p>
-                                </div>
-                            )}
-                        </div>
-                        <div style={{ flex: 1, minWidth: '240px' }}>
-                            {selectedTeamId && (
-                                <div style={{ animation: 'slideInRight 0.4s ease' }}>
-                                    <h4 style={{ fontSize: '0.9rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '15px' }}>Personnel</h4>
-                                    <div style={{ display: 'grid', gap: '10px' }}>
-                                        {teamMembers.map(m => (
-                                            <div key={m.uid} style={{ background: 'white', padding: '12px', borderRadius: '12px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                                <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{m.name}</div>
-                                                <div style={{ fontSize: '0.75rem', color: '#64748b' }}>{m.role}</div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                    {teamRequests.length > 0 && (
-                                        <div style={{ marginTop: '30px' }}>
-                                            <h4 style={{ fontSize: '0.9rem', color: '#f59e0b', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '15px' }}>Pending Requests</h4>
-                                            {teamRequests.map((r: any) => (
-                                                <div key={r.id} style={{ border: '1px solid #fef3c7', background: '#fffbeb', padding: '12px', borderRadius: '12px', marginBottom: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                                    <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>{r.userName}</span>
-                                                    <button onClick={() => handleAcceptTeamReq(r)} style={{ background: '#10b981', color: 'white', border: 'none', padding: '6px 12px', borderRadius: '8px', cursor: 'pointer', fontWeight: 600 }}>Approve</button>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                    {myTeams.find(t => t.id === selectedTeamId)?.leaderId === user?.uid && (
-                                        <button onClick={handleDeleteTeam} style={{ marginTop: '40px', width: '100%', padding: '14px', background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '12px', cursor: 'pointer', fontWeight: 700 }}>
-                                            Disband Team
-                                        </button>
-                                    )}
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                )}
+                    Community Feed
+                </h1>
             </div>
 
-            <style>{`
-                @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-                @keyframes slideInRight { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
-            `}</style>
+            {/* Main Navigation Tabs */}
+            <div style={{
+                display: 'flex',
+                gap: '10px',
+                marginBottom: '30px',
+                padding: '10px',
+                background: 'rgba(255,255,255,0.03)',
+                borderRadius: '20px',
+                border: '1px solid rgba(255,255,255,0.05)',
+                backdropFilter: 'blur(10px)',
+                width: 'fit-content'
+            }}>
+                {[
+                    { id: 'events', label: 'Events (Official)', icon: '🎪' },
+                    { id: 'team', label: 'My Teams', icon: '👥' },
+                    { id: 'club', label: 'Club Community', icon: '🏢' }
+                ].map((t) => (
+                    <button
+                        key={t.id}
+                        onClick={() => setTab(t.id as any)}
+                        style={{
+                            padding: '12px 24px',
+                            borderRadius: '14px',
+                            border: 'none',
+                            cursor: 'pointer',
+                            fontWeight: 700,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+                            background: tab === t.id ? 'linear-gradient(135deg, #646cff 0%, #4a51e6 100%)' : 'transparent',
+                            color: tab === t.id ? 'white' : '#888',
+                            boxShadow: tab === t.id ? '0 10px 20px rgba(100, 108, 255, 0.4)' : 'none',
+                            transform: tab === t.id ? 'translateY(-2px)' : 'none'
+                        }}
+                    >
+                        <span>{t.icon}</span>
+                        {t.label}
+                    </button>
+                ))}
+            </div>
+
+            {tab === 'team' ? (
+                <div style={{
+                    display: 'flex',
+                    height: '82vh',
+                    background: '#121212',
+                    borderRadius: '24px',
+                    padding: '25px',
+                    boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
+                    border: '1px solid rgba(255,255,255,0.05)',
+                    overflow: 'hidden'
+                }}>
+                    {/* Left: Chat */}
+                    <div style={{ flex: 3, borderRight: '1px solid #444', paddingRight: '20px', display: 'flex', flexDirection: 'column' }}>
+                        <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', overflowX: 'auto', paddingBottom: '10px' }}>
+                            {myTeams.map(team => (
+                                <button key={team.id} onClick={() => setSelectedTeamId(team.id)}
+                                    style={{ background: selectedTeamId === team.id ? '#007bff' : '#333', color: 'white', padding: '10px', borderRadius: '5px', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                                    {team.name}
+                                </button>
+                            ))}
+                        </div>
+                        {selectedTeamId ? (
+                            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                                <h3 style={{ marginTop: 0, color: '#aaa' }}>{currentEventName}</h3>
+                                <ChatRoom communityId={selectedTeamId} type="team" />
+                            </div>
+                        ) : <p style={{ color: '#888' }}>Select a team to start chatting.</p>}
+                    </div>
+
+                    {/* Right: Sidebar */}
+                    <div style={{ flex: 1, paddingLeft: '20px', overflowY: 'auto' }}>
+                        {/* Requests Section */}
+                        {requests.length > 0 && (
+                            <div style={{ marginBottom: '20px', borderBottom: '1px solid #555', paddingBottom: '10px' }}>
+                                <h3 style={{ color: 'orange' }}>Join Requests</h3>
+                                <ul style={{ listStyle: 'none', padding: 0 }}>
+                                    {requests.map(req => (
+                                        <li key={req.id} style={{ marginBottom: '10px', background: 'rgba(255,255,255,0.05)', padding: '10px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)' }}>
+                                            <div style={{ fontSize: '0.9rem', fontWeight: 'bold', color: 'white' }}>{req.userName || req.userId}</div>
+                                            <div style={{ marginTop: '8px', display: 'flex', gap: '8px' }}>
+                                                <button onClick={() => handleAccept(req)} style={{ flex: 1, background: '#10b981', color: 'white', border: 'none', padding: '5px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>Accept</button>
+                                                <button onClick={() => handleReject(req.id)} style={{ flex: 1, background: '#ef4444', color: 'white', border: 'none', padding: '5px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>Reject</button>
+                                            </div>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
+
+                        <h3 style={{ color: 'white' }}>Team Members</h3>
+                        <ul style={{ listStyle: 'none', padding: 0 }}>
+                            {teamMembers.map(m => (
+                                <li key={m.uid} style={{ padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#ccc' }}>
+                                    <span>{m.name} <span style={{ fontSize: '0.75rem', color: '#666' }}>({m.role})</span></span>
+                                    {myTeams.find(t => t.id === selectedTeamId)?.leaderId === user?.uid && m.uid !== user?.uid && (
+                                        <button onClick={() => handleRemoveMember(m.uid)} style={{ color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8rem' }}>Remove</button>
+                                    )}
+                                </li>
+                            ))}
+                        </ul>
+                        {myTeams.find(t => t.id === selectedTeamId)?.leaderId === user?.uid && (
+                            <button onClick={handleDeleteTeam} style={{ marginTop: '20px', background: '#450a0a', color: '#f87171', border: '1px solid #7f1d1d', padding: '10px', width: '100%', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}>
+                                Delete Team
+                            </button>
+                        )}
+                    </div>
+                </div>
+            ) : tab === 'events' ? (
+                <div style={{
+                    height: '82vh',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    background: '#121212',
+                    borderRadius: '24px',
+                    padding: '25px',
+                    boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
+                    border: '1px solid rgba(255,255,255,0.05)',
+                    overflow: 'hidden',
+                    position: 'relative'
+                }}>
+                    {/* Premium Header with Glassmorphism Navigation */}
+                    <div style={{
+                        marginBottom: '25px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '15px'
+                    }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <h2 style={{
+                                margin: 0,
+                                fontSize: '2rem',
+                                fontWeight: 800,
+                                background: 'linear-gradient(to right, #646cff, #9f7aea)',
+                                WebkitBackgroundClip: 'text',
+                                WebkitTextFillColor: 'transparent'
+                            }}>
+                                Event Hub
+                            </h2>
+                            {selectedEventTab === 'all' && (
+                                <button
+                                    onClick={() => alert("To seed messages, click the 'DEBUG: Fix & Seed' button at the bottom of the chat room if it appears empty!")}
+                                    style={{
+                                        background: 'rgba(255,255,255,0.05)',
+                                        border: '1px solid rgba(255,255,255,0.1)',
+                                        color: '#aaa',
+                                        padding: '5px 12px',
+                                        borderRadius: '12px',
+                                        fontSize: '0.75rem',
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    💡 Need Test Data?
+                                </button>
+                            )}
+                        </div>
+
+                        <div style={{
+                            display: 'flex',
+                            gap: '12px',
+                            overflowX: 'auto',
+                            padding: '8px',
+                            background: 'rgba(255,255,255,0.03)',
+                            borderRadius: '16px',
+                            backdropFilter: 'blur(10px)',
+                            border: '1px solid rgba(255,255,255,0.05)'
+                        }}>
+                            <button
+                                onClick={() => setSelectedEventTab('all')}
+                                style={{
+                                    padding: '10px 20px',
+                                    borderRadius: '12px',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    fontWeight: 700,
+                                    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                                    background: selectedEventTab === 'all' ? 'linear-gradient(135deg, #646cff 0%, #4a51e6 100%)' : 'rgba(255,255,255,0.05)',
+                                    color: 'white',
+                                    boxShadow: selectedEventTab === 'all' ? '0 8px 15px rgba(100, 108, 255, 0.3)' : 'none',
+                                    transform: selectedEventTab === 'all' ? 'translateY(-2px)' : 'none',
+                                    minWidth: '120px'
+                                }}
+                            >
+                                🌎 Global Feed
+                            </button>
+                            {joinedEvents.map(ev => (
+                                <button
+                                    key={ev.id}
+                                    onClick={() => setSelectedEventTab(ev.id)}
+                                    style={{
+                                        padding: '10px 22px',
+                                        borderRadius: '12px',
+                                        border: 'none',
+                                        cursor: 'pointer',
+                                        fontWeight: 700,
+                                        transition: 'all 0.3s ease',
+                                        background: selectedEventTab === ev.id ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : 'rgba(255,255,255,0.05)',
+                                        color: 'white',
+                                        boxShadow: selectedEventTab === ev.id ? '0 8px 15px rgba(16, 185, 129, 0.2)' : 'none',
+                                        transform: selectedEventTab === ev.id ? 'translateY(-2px)' : 'none',
+                                        whiteSpace: 'nowrap'
+                                    }}
+                                >
+                                    🎯 {ev.title}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div style={{
+                        flex: 1,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        overflow: 'hidden',
+                        borderRadius: '20px',
+                        background: 'rgba(0,0,0,0.2)',
+                        border: '1px solid rgba(255,255,255,0.03)'
+                    }}>
+                        <div style={{
+                            padding: '12px 20px',
+                            background: 'rgba(255,255,255,0.02)',
+                            borderBottom: '1px solid rgba(255,255,255,0.05)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '10px'
+                        }}>
+                            <div style={{
+                                width: '10px',
+                                height: '10px',
+                                borderRadius: '50%',
+                                background: selectedEventTab === 'all' ? '#646cff' : '#10b981',
+                                boxShadow: `0 0 10px ${selectedEventTab === 'all' ? '#646cff' : '#10b981'}`
+                            }}></div>
+                            <span style={{ fontSize: '0.9rem', fontWeight: 600, color: '#eee' }}>
+                                {selectedEventTab === 'all' ? 'Official Announcements' : `Discussion: ${joinedEvents.find(e => e.id === selectedEventTab)?.title}`}
+                            </span>
+                        </div>
+                        <div style={{ flex: 1, overflow: 'hidden' }}>
+                            <ChatRoom
+                                key={selectedEventTab}
+                                communityId={selectedEventTab === 'all' ? 'official_event_feed' : selectedEventTab}
+                                type="event"
+                            />
+                        </div>
+                    </div>
+                </div>
+            ) : (
+                <div style={{
+                    height: '82vh',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    background: '#121212',
+                    borderRadius: '24px',
+                    padding: '25px',
+                    boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
+                    border: '1px solid rgba(255,255,255,0.05)',
+                    overflow: 'hidden'
+                }}>
+                    <h3 style={{
+                        borderLeft: '4px solid #10b981',
+                        paddingLeft: '15px',
+                        color: '#10b981',
+                        marginTop: 0,
+                        marginBottom: '20px',
+                        fontSize: '1.5rem'
+                    }}>
+                        Club Community Chat
+                    </h3>
+                    <div style={{ flex: 1, overflow: 'hidden', borderRadius: '20px', background: 'rgba(0,0,0,0.2)' }}>
+                        <ChatRoom communityId="global_club_community" type="club" />
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
+
 
 export default Feed;
