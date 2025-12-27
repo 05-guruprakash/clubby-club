@@ -64,7 +64,7 @@ const AppContent = () => {
       {currentView === 'clubs' && <Clubs />}
       {currentView === 'feed' && <Feed />}
       {currentView === 'notifications' && <Notifications />}
-      {currentView === 'profile' && <Profile />}
+      {currentView === 'profile' && <Profile setView={setView} />}
     </GlobalShell>
   );
 };

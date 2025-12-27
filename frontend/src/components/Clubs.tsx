@@ -225,8 +225,8 @@ const Clubs = () => {
 
                 setMembers(fetchedMembers);
 
-                // If Chairperson, fetch pending requests
-                if (remoteRole === 'chairperson' || remoteRole === 'chairman') {
+                // If Chairperson or Vice Chairman, fetch pending requests
+                if (['chairperson', 'chairman', 'vice_chairman'].includes(remoteRole || '')) {
                     try {
                         const rq = query(collection(db, `clubs/${selectedClub.id}/members`), where('status', '==', 'pending'));
                         const rSnap = await getDocs(rq);
@@ -281,10 +281,13 @@ const Clubs = () => {
         }
     };
 
-    const handleRejectMember = async (member: ClubMember) => {
+    const handleRejectMember = async (member: ClubMember, isRemoval = false) => {
         if (!selectedClub || !user) return;
+        if (isRemoval && !confirm(`Are you sure you want to remove ${member.name}?`)) return;
+
         try {
             const token = await user.getIdToken();
+            // Reuse reject endpoint for removal as it likely just deletes the member doc
             const response = await fetch(`${API_BASE}/clubs/${selectedClub.id}/reject`, {
                 method: 'POST',
                 headers: {
@@ -294,12 +297,17 @@ const Clubs = () => {
                 body: JSON.stringify({ targetUserId: member.userId })
             });
 
-            if (!response.ok) throw new Error("Rejection failed on server");
+            if (!response.ok) throw new Error("Operation failed on server");
 
-            setRequests(requests.filter(r => r.userId !== member.userId));
-            alert(`Rejected ${member.name}`);
+            if (isRemoval) {
+                setMembers(members.filter(m => m.userId !== member.userId));
+                alert(`Removed ${member.name}`);
+            } else {
+                setRequests(requests.filter(r => r.userId !== member.userId));
+                alert(`Rejected ${member.name}`);
+            }
         } catch (e: any) {
-            console.error("Rejection error:", e);
+            console.error("Action error:", e);
             alert(e.message);
         }
     };
@@ -307,6 +315,13 @@ const Clubs = () => {
 
     const handleUpdateRole = async (member: ClubMember, newRole: string) => {
         if (!selectedClub || !user) return;
+
+        if (newRole === 'chairperson' || newRole === 'chairman') {
+            if (!confirm("WARNING: Transferring Admin rights will immediately revoke your Admin status. You will become a Member. Are you sure?")) {
+                return;
+            }
+        }
+
         try {
             const token = await user.getIdToken();
             const response = await fetch(`${API_BASE}/clubs/${selectedClub.id}/role`, {
@@ -322,6 +337,12 @@ const Clubs = () => {
 
             setMembers(members.map(m => m.userId === member.userId ? { ...m, role: newRole } : m));
             alert(`Updated ${member.name} to ${newRole}`);
+
+            // If self-demotion (transfer admin), reload page or reset state
+            if ((newRole === 'chairperson' || newRole === 'chairman') && member.userId !== user.uid) {
+                window.location.reload(); // Simple way to refresh permissions
+            }
+
         } catch (e: any) {
             console.error("Promotion error:", e);
             alert(e.message);
@@ -678,21 +699,40 @@ const Clubs = () => {
                                             </div>
                                         </div>
 
+                                        {/* Admin Role Management */}
                                         {(myRole === 'chairperson' || myRole === 'chairman') && member.userId !== user?.uid && (
                                             <div style={{ marginTop: '15px', paddingTop: '10px', borderTop: '1px solid #eee' }} onClick={(e) => e.stopPropagation()}>
                                                 <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#94a3b8', marginBottom: '5px', textTransform: 'uppercase' }}>Promote / Change Role</div>
                                                 <select
                                                     value={member.role}
                                                     onChange={(e) => handleUpdateRole(member, e.target.value)}
-                                                    style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.85rem', cursor: 'pointer' }}
+                                                    style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.85rem', cursor: 'pointer', marginBottom: '8px' }}
                                                 >
                                                     <option value="member">Member</option>
-                                                    <option value="moderator">Moderator</option>
-                                                    <option value="vice_chairman">Vice Chairman</option>
+                                                    <option value="joint_secretary">Joint Secretary</option>
                                                     <option value="secretary">Secretary</option>
                                                     <option value="event_head">Event Head</option>
-                                                    <option value="chairperson">Chairperson</option>
+                                                    <option value="vice_chairman">Vice Chairman</option>
+                                                    <option value="chairperson">Admin / Chairman</option>
                                                 </select>
+                                                <button
+                                                    onClick={() => handleRejectMember(member, true)}
+                                                    style={{ width: '100%', padding: '6px', background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}
+                                                >
+                                                    Remove Member
+                                                </button>
+                                            </div>
+                                        )}
+
+                                        {/* Vice Chairman can Remove but NOT Promote */}
+                                        {myRole === 'vice_chairman' && member.userId !== user?.uid && member.role !== 'chairperson' && member.role !== 'chairman' && (
+                                            <div style={{ marginTop: '15px', paddingTop: '10px', borderTop: '1px solid #eee' }} onClick={(e) => e.stopPropagation()}>
+                                                <button
+                                                    onClick={() => handleRejectMember(member, true)}
+                                                    style={{ width: '100%', padding: '6px', background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}
+                                                >
+                                                    Remove Member
+                                                </button>
                                             </div>
                                         )}
                                     </div>
