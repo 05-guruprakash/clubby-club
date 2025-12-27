@@ -172,4 +172,48 @@ router.post("/:id/role", verifyToken, async (req, res) => {
   }
 });
 
+// --- CLUB CHAT ENHANCEMENTS (Bypass Permission Issues) ---
+
+// Like/Unlike Message in Club Chat
+router.post("/chat/like", verifyToken, async (req, res) => {
+  try {
+    const { messageId } = req.body;
+    const userId = req.user.uid;
+    const msgRef = db.collection("community_messages").doc(messageId);
+
+    const doc = await msgRef.get();
+    if (!doc.exists) return res.status(404).json({ error: "Message not found" });
+
+    const currentLikes = doc.data().likes || [];
+    if (currentLikes.includes(userId)) {
+      await msgRef.update({
+        likes: admin.firestore.FieldValue.arrayRemove(userId)
+      });
+    } else {
+      await msgRef.update({
+        likes: admin.firestore.FieldValue.arrayUnion(userId)
+      });
+    }
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Add Comment to Message in Club Chat
+router.post("/chat/comment", verifyToken, async (req, res) => {
+  try {
+    const { messageId, comment } = req.body;
+    // comment is expected to be the full Comment object
+    const msgRef = db.collection("community_messages").doc(messageId);
+
+    await msgRef.update({
+      comments: admin.firestore.FieldValue.arrayUnion(comment)
+    });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

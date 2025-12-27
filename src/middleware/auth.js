@@ -1,6 +1,7 @@
 const { auth, db } = require("../config/firebase");
 
 const verifyToken = async (req, res, next) => {
+  let decoded;
   try {
     const authHeader = req.headers.authorization;
 
