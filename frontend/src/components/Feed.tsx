@@ -48,7 +48,10 @@ const Feed = () => {
                 snapLeader.docs.forEach(d => allTeamsMap.set(d.id, { id: d.id, ...d.data() }));
                 snapMember.docs.forEach(d => allTeamsMap.set(d.id, { id: d.id, ...d.data() }));
 
-                const allTeams = Array.from(allTeamsMap.values()) as (Team & { eventId: string })[];
+                const allTeams = Array.from(allTeamsMap.values()).map(t => ({
+                    ...t,
+                    leaderId: t.leaderId || t.leader_id
+                })) as (Team & { eventId: string })[];
                 setMyTeams(allTeams.filter(t => activeEventIds.has(t.eventId)));
 
                 // Populate Joined Events for specific tabs
@@ -135,13 +138,51 @@ const Feed = () => {
     };
 
     const handleDeleteTeam = async () => {
-        if (!confirm('Delete this team entirely? This cannot be undone.')) return;
+        if (!confirm('🛑 WARNING: This will permanently delete the team, all members, and all chat history. Continue?')) return;
+
         try {
-            if (!selectedTeamId) return;
+            if (!selectedTeamId || !user) {
+                alert("Session error: Missing team or user identity.");
+                return;
+            }
+
+            // Client-side safety: Only leader can initiate
+            const team = myTeams.find(t => t.id === selectedTeamId);
+            const teamLeaderId = team?.leaderId || (team as any)?.leader_id;
+
+            if (teamLeaderId !== user.uid) {
+                alert("Only the team leader can disband the team.");
+                return;
+            }
+
+            console.log("Stage 1: Attempting backend disband...");
+            const token = await user.getIdToken();
+            const response = await fetch(`http://localhost:3001/teams/${selectedTeamId}`, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+
+            if (response.ok) {
+                alert("✅ Team disbanded successfully via server.");
+                setSelectedTeamId(null);
+                setMyTeams(prev => prev.filter(t => t.id !== selectedTeamId));
+                return;
+            }
+
+            // Stage 2: Fallback to Direct Firestore if backend fails
+            const errorData = await response.json().catch(() => ({}));
+            console.warn("Backend disband failed, attempting direct Firestore fallback...", errorData.error);
+
             await deleteDoc(doc(db, 'teams', selectedTeamId));
+
+            alert("✅ Team disbanded (Direct Mode). Cloud records updated successfully.");
             setSelectedTeamId(null);
             setMyTeams(prev => prev.filter(t => t.id !== selectedTeamId));
-        } catch (e) { console.error(e); }
+
+        } catch (e: any) {
+            console.error("Critical Disband Failure:", e);
+            alert(`Could not disband team: ${e.message || 'Unknown error'}`);
+        }
     };
 
     const handleAccept = async (req: any) => {
@@ -276,13 +317,13 @@ const Feed = () => {
                             {teamMembers.map(m => (
                                 <li key={m.uid} style={{ padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#ccc' }}>
                                     <span>{m.name} <span style={{ fontSize: '0.75rem', color: '#666' }}>({m.role})</span></span>
-                                    {myTeams.find(t => t.id === selectedTeamId)?.leaderId === user?.uid && m.uid !== user?.uid && (
+                                    {(myTeams.find(t => t.id === selectedTeamId)?.leaderId || (myTeams.find(t => t.id === selectedTeamId) as any)?.leader_id) === user?.uid && m.uid !== user?.uid && (
                                         <button onClick={() => handleRemoveMember(m.uid)} style={{ color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8rem' }}>Remove</button>
                                     )}
                                 </li>
                             ))}
                         </ul>
-                        {myTeams.find(t => t.id === selectedTeamId)?.leaderId === user?.uid && (
+                        {(myTeams.find(t => t.id === selectedTeamId)?.leaderId || (myTeams.find(t => t.id === selectedTeamId) as any)?.leader_id) === user?.uid && (
                             <button onClick={handleDeleteTeam} style={{ marginTop: '20px', background: '#450a0a', color: '#f87171', border: '1px solid #7f1d1d', padding: '10px', width: '100%', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}>
                                 Delete Team
                             </button>

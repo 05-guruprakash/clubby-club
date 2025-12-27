@@ -75,8 +75,8 @@ const Discover = () => {
             const querySnapshot = await getDocs(q);
             const teamsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Team));
 
-            // Separate my team from others
-            const myOwnedTeam = teamsData.find(t => t.leaderId === user?.uid);
+            // Separate my team from others (Handling both leaderId and leader_id for compatibility)
+            const myOwnedTeam = teamsData.find(t => (t.leaderId || (t as any).leader_id) === user?.uid);
             setMyTeam(myOwnedTeam || null);
 
             // Filter for public list (not full, and not my own team ideally)
@@ -152,6 +152,7 @@ const Discover = () => {
                 description: teamDesc,
                 profile_pic: teamPic,
                 leaderId: user.uid,
+                leader_id: user.uid, // Dual support for legacy backend checks
                 eventId: selectedEventId,
                 current_members: 1,
                 members: [user.uid], // Keeping redundant array for easy querying if needed

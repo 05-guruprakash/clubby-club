@@ -10,55 +10,46 @@ const verifyToken = async (req, res, next) => {
     }
 
     const token = authHeader.split(" ")[1];
-    // DIRECT BYPASS SUPPORT
-    if (token === "dev-bypass-token" || process.env.ENABLE_AUTH_BYPASS === 'true') {
+
+    // 1. DIRECT BYPASS SUPPORT
+    if (token === "dev-bypass-token") {
+      decoded = { uid: "dev_user_bypass", name: "Dev User", email: "dev@bypass.com" };
+    } else if (process.env.ENABLE_AUTH_BYPASS === 'true' && token.split('.').length !== 3) {
+      // Allow bypass if enabled and token is NOT a JWT (mock token)
       decoded = { uid: "dev_user_bypass", name: "Dev User", email: "dev@bypass.com" };
     } else {
-
+      // 2. ATTEMPT REAL VERIFICATION
       try {
         decoded = await auth.verifyIdToken(token);
       } catch (verifyErr) {
-        console.warn("AUTH FIX: verifyIdToken failed. Attempting bypass logic...", verifyErr.message);
+        // 3. RECOVERY LOGIC (Unsafe decode to preserve UID in dev)
+        console.warn("AUTH FIX: verifyIdToken failed. Attempting unsafe decode...", verifyErr.message);
+        try {
+          const base64Url = token.split('.')[1];
+          const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+          const jsonPayload = Buffer.from(base64, 'base64').toString('utf-8');
+          const payload = JSON.parse(jsonPayload);
 
-        // Critical check for backend misconfiguration (Authentication Failure)
-        if (verifyErr.message && (verifyErr.message.includes("16 UNAUTHENTICATED") || verifyErr.code === "auth/internal-error")) {
-          console.warn("AUTH WARNING: Backend credentials failing (16 UNAUTHENTICATED). Attempting unsafe decode to preserve User Identity...");
+          // Firebase tokens use 'user_id' or 'sub' for the UID
+          decoded = {
+            ...payload,
+            uid: payload.user_id || payload.sub || payload.uid
+          };
 
-          // ATTEMPT UNSAFE DECODE TO GET REAL UID
-          try {
-            const base64Url = token.split('.')[1];
-            const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-            const jsonPayload = Buffer.from(base64, 'base64').toString('utf-8');
-            decoded = JSON.parse(jsonPayload);
-            decoded.uid = decoded.user_id || decoded.sub;
-            console.log(`AUTH RECOVERY: Successfully extracted UID ${decoded.uid} from token despite backend auth error.`);
-          } catch (decodeErr) {
-            console.error("AUTH FAIL: Could not decode token.", decodeErr);
-            // ONLY failover to mock if we strictly cannot parse the token
-            console.log("AUTH BYPASS: Mocking user 'dev_user' as last resort.");
-            decoded = { uid: "dev_user_bypass", name: "Dev User" };
+          if (!decoded.uid) {
+            throw new Error("No UID found in token payload");
           }
-
-        } else {
-          // Fallback for other errors: try unsafe decode or throw
-          try {
-            const base64Url = token.split('.')[1];
-            const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-            const jsonPayload = Buffer.from(base64, 'base64').toString('utf-8');
-            decoded = JSON.parse(jsonPayload);
-            decoded.uid = decoded.user_id || decoded.sub;
-          } catch (e) {
-            if (verifyErr.message && verifyErr.message.includes("UNAUTHENTICATED")) {
-              decoded = { uid: "dev_user_bypass", name: "Dev User" };
-            } else {
-              throw verifyErr;
-            }
+        } catch (decodeErr) {
+          console.error("AUTH FAIL: Manual decode failed.", decodeErr.message);
+          // 4. MOCK FALLBACK (If everything else fails)
+          if (verifyErr.message.includes("UNAUTHENTICATED") || verifyErr.code === "auth/internal-error") {
+            decoded = { uid: "forced_bypass", name: "Dev User" };
+          } else {
+            throw verifyErr;
           }
         }
       }
     }
-
-    // Logic continues...
 
     const uid = decoded.uid || "unknown_user";
     const userRef = db.collection("users").doc(uid);

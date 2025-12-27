@@ -170,9 +170,10 @@ const ChatRoom: FC<ChatRoomProps> = ({ communityId, type }) => {
                     const teamDoc = await getDoc(doc(db, 'teams', communityId));
                     if (teamDoc.exists()) {
                         const data = teamDoc.data();
-                        if (data.leaderId === user.uid || (data.members && data.members.includes(user.uid))) {
+                        const teamLeaderId = data.leaderId || data.leader_id;
+                        if (teamLeaderId === user.uid || (data.members && data.members.includes(user.uid))) {
                             setAccessDenied(false);
-                            setUserRoleInContext(data.leaderId === user.uid ? 'leader' : 'member');
+                            setUserRoleInContext(teamLeaderId === user.uid ? 'leader' : 'member');
                             return;
                         }
                     }
