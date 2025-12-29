@@ -26,6 +26,17 @@ interface ClubMember {
     email?: string;
     username?: string;
     regNo?: string;
+    team?: string;
+    description?: string;
+    skills?: string;
+    reason?: string;
+}
+
+interface JoinFormData {
+    team: string;
+    description: string;
+    skills: string;
+    reason: string;
 }
 
 const Clubs = () => {
@@ -40,6 +51,17 @@ const Clubs = () => {
     const [requests, setRequests] = useState<ClubMember[]>([]);
     const [pendingClubIds, setPendingClubIds] = useState<string[]>([]);
     const [myRole, setMyRole] = useState<string | null>(null);
+
+    // Join Form State
+    const [showJoinForm, setShowJoinForm] = useState(false);
+    const [clubToJoin, setClubToJoin] = useState<Club | null>(null);
+    const [joinFormData, setJoinFormData] = useState<JoinFormData>({
+        team: '',
+        description: '',
+        skills: '',
+        reason: ''
+    });
+    const [joining, setJoining] = useState(false);
 
     useEffect(() => {
         const fetchClubs = async () => {
@@ -183,7 +205,11 @@ const Clubs = () => {
                             // @ts-ignore
                             username: ud.username || 'N/A',
                             // @ts-ignore
-                            regNo: ud.regNo || 'N/A'
+                            regNo: ud.regNo || 'N/A',
+                            team: d.data().team || '',
+                            description: d.data().description || '',
+                            skills: d.data().skills || '',
+                            reason: d.data().reason || ''
                         } as ClubMember;
                     }));
 
@@ -242,7 +268,11 @@ const Clubs = () => {
                                 // @ts-ignore
                                 name: `${ud.firstName || ''} ${ud.lastName || ''}`.trim() || 'Applicant',
                                 // @ts-ignore
-                                email: ud.officialMail || 'N/A'
+                                email: ud.officialMail || 'N/A',
+                                team: d.data().team || '',
+                                description: d.data().description || '',
+                                skills: d.data().skills || '',
+                                reason: d.data().reason || ''
                             } as ClubMember;
                         }));
                         setRequests(rList);
@@ -365,7 +395,7 @@ const Clubs = () => {
         localStorage.setItem(`joined_clubs_${user.uid}`, JSON.stringify(ids));
     };
 
-    const handleJoinClub = async (club: Club) => {
+    const handleJoinClub = (club: Club) => {
         if (!user) return;
 
         // PREVENT REDUNDANT JOINS
@@ -382,13 +412,29 @@ const Clubs = () => {
             return;
         }
 
+        setClubToJoin(club);
+        setShowJoinForm(true);
+    };
+
+    const submitJoinForm = async () => {
+        if (!user || !clubToJoin) return;
+        if (!joinFormData.team || !joinFormData.description || !joinFormData.skills || !joinFormData.reason) {
+            alert("Please fill in all the details.");
+            return;
+        }
+
+        setJoining(true);
         try {
             // 1. Backend API (Best Effort)
             try {
                 const token = await user.getIdToken();
-                await fetch(`${API_BASE}/clubs/${club.id}/join`, {
+                await fetch(`${API_BASE}/clubs/${clubToJoin.id}/join`, {
                     method: 'POST',
-                    headers: { 'Authorization': `Bearer ${token}` }
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(joinFormData)
                 });
             } catch (e) { console.warn("Backend join skipped"); }
 
@@ -398,28 +444,31 @@ const Clubs = () => {
 
                 const userRef = doc(db, 'users', user.uid);
                 await setDoc(userRef, {
-                    joined_clubs: arrayUnion(club.id),
-                    [`roles.${club.id}`]: 'member'
+                    joined_clubs: arrayUnion(clubToJoin.id),
+                    [`roles.${clubToJoin.id}`]: 'member'
                 }, { merge: true });
 
-                const memberRef = doc(db, `clubs/${club.id}/members`, user.uid);
+                const memberRef = doc(db, `clubs/${clubToJoin.id}/members`, user.uid);
                 await setDoc(memberRef, {
-                    userId: user.uid, status: status, role: 'member',
-                    joined_at: new Date(), name: user.displayName || 'User', email: user.email || ''
+                    userId: user.uid,
+                    status: status,
+                    role: 'member',
+                    joined_at: new Date(),
+                    name: user.displayName || 'User',
+                    email: user.email || '',
+                    ...joinFormData // Spread form data: team, description, skills, reason
                 }, { merge: true });
 
                 // C. Increment Member Count (Robust)
                 try {
-                    const clubRef = doc(db, 'clubs', club.id);
-                    // Try atomic increment first
+                    const clubRef = doc(db, 'clubs', clubToJoin.id);
                     await updateDoc(clubRef, { member_count: increment(1) });
                 } catch (e) {
-                    // Fallback: Read-Modify-Write
                     try {
-                        const cSnap = await getDoc(doc(db, 'clubs', club.id));
+                        const cSnap = await getDoc(doc(db, 'clubs', clubToJoin.id));
                         if (cSnap.exists()) {
                             const currentCount = cSnap.data().member_count || 0;
-                            await updateDoc(doc(db, 'clubs', club.id), { member_count: currentCount + 1 });
+                            await updateDoc(doc(db, 'clubs', clubToJoin.id), { member_count: currentCount + 1 });
                         }
                     } catch (e2) { console.warn("Could not update member count via fallback", e2); }
                 }
@@ -428,21 +477,28 @@ const Clubs = () => {
 
             // 3. Local Persistence (Guaranteed)
             const currentLocal = getLocalJoined();
-            if (!currentLocal.includes(club.id)) {
-                saveLocalJoined([...currentLocal, club.id]);
+            if (!currentLocal.includes(clubToJoin.id)) {
+                saveLocalJoined([...currentLocal, clubToJoin.id]);
             }
 
             // 4. UI Update
-            alert(`Joined ${club.name}!`);
-            const updatedClub = { ...club, member_count: (club.member_count || 0) + 1 };
+            alert(`Successfully joined ${clubToJoin.name}!`);
+            const updatedClub = { ...clubToJoin, member_count: (clubToJoin.member_count || 0) + 1 };
             setJoinedClubs((prev) => [...prev, updatedClub]);
-            setOtherClubs((prev) => prev.filter(c => c.id !== club.id));
+            setOtherClubs((prev) => prev.filter(c => c.id !== clubToJoin.id));
             setIsMember(true);
-            if (selectedClub?.id === club.id) setSelectedClub(updatedClub);
+            if (selectedClub?.id === clubToJoin.id) setSelectedClub(updatedClub);
+
+            // Reset form
+            setShowJoinForm(false);
+            setClubToJoin(null);
+            setJoinFormData({ team: '', description: '', skills: '', reason: '' });
 
         } catch (e: any) {
             console.error("Join Error:", e);
             alert("Joined (Local Mode)"); // Fallback success
+        } finally {
+            setJoining(false);
         }
     };
 
@@ -649,8 +705,9 @@ const Clubs = () => {
                                 {requests.map(req => (
                                     <div key={req.userId} style={{ background: 'white', padding: '16px', borderRadius: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
                                         <div>
-                                            <div style={{ fontWeight: 600 }}>{req.name}</div>
+                                            <div style={{ fontWeight: 600 }}>{req.name} {req.team ? <span style={{ fontSize: '0.75rem', background: '#dcfce7', color: '#166534', padding: '2px 6px', borderRadius: '4px', marginLeft: '5px' }}>{req.team}</span> : ''}</div>
                                             <div style={{ fontSize: '0.85rem', color: '#666' }}>{req.email}</div>
+                                            {req.reason && <div style={{ fontSize: '0.8rem', color: '#64748b', fontStyle: 'italic', marginTop: '4px' }}>"{req.reason.substring(0, 60)}{req.reason.length > 60 ? '...' : ''}"</div>}
                                         </div>
                                         <div style={{ display: 'flex', gap: '10px' }}>
                                             <button
@@ -711,7 +768,7 @@ const Clubs = () => {
                                                     fontSize: '0.75rem', textTransform: 'uppercase', fontWeight: 700,
                                                     color: (member.role === 'chairman' || member.role === 'chairperson') ? '#b45309' : '#64748b'
                                                 }}>
-                                                    {member.role}
+                                                    {member.role} {member.team ? `• ${member.team}` : ''}
                                                 </div>
                                             </div>
                                         </div>
@@ -815,6 +872,38 @@ const Clubs = () => {
                                         <small style={{ color: '#64748b', fontWeight: 600 }}>OFFICIAL EMAIL</small><br />
                                         <strong>{selectedMemberProfile.email}</strong>
                                     </div>
+
+                                    {selectedMemberProfile.team && (
+                                        <div style={{ padding: '12px', background: '#eff6ff', borderRadius: '12px', borderLeft: '4px solid #3b82f6' }}>
+                                            <small style={{ color: '#3b82f6', fontWeight: 700 }}>TEAM</small><br />
+                                            <strong>{selectedMemberProfile.team}</strong>
+                                        </div>
+                                    )}
+
+                                    {selectedMemberProfile.description && (
+                                        <div style={{ padding: '12px', background: '#f8fafc', borderRadius: '12px' }}>
+                                            <small style={{ color: '#64748b', fontWeight: 600 }}>ABOUT</small><br />
+                                            <p style={{ margin: '5px 0 0', fontSize: '0.9rem', lineHeight: '1.4' }}>{selectedMemberProfile.description}</p>
+                                        </div>
+                                    )}
+
+                                    {selectedMemberProfile.skills && (
+                                        <div style={{ padding: '12px', background: '#f8fafc', borderRadius: '12px' }}>
+                                            <small style={{ color: '#64748b', fontWeight: 600 }}>SKILLS</small><br />
+                                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginTop: '5px' }}>
+                                                {selectedMemberProfile.skills.split(',').map((skill, i) => (
+                                                    <span key={i} style={{ background: '#e2e8f0', padding: '2px 8px', borderRadius: '4px', fontSize: '0.75rem' }}>{skill.trim()}</span>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {selectedMemberProfile.reason && (
+                                        <div style={{ padding: '12px', background: '#f8fafc', borderRadius: '12px' }}>
+                                            <small style={{ color: '#64748b', fontWeight: 600 }}>REASON FOR JOINING</small><br />
+                                            <p style={{ margin: '5px 0 0', fontSize: '0.9rem', lineHeight: '1.4' }}>{selectedMemberProfile.reason}</p>
+                                        </div>
+                                    )}
                                 </div>
 
                                 <button
@@ -938,6 +1027,94 @@ const Clubs = () => {
                             {otherClubs.length === 0 && <p style={{ color: '#64748b' }}>No other clubs found at this time.</p>}
                         </div>
                     </div>
+                    {/* Join Club Form Modal */}
+                    {showJoinForm && clubToJoin && (
+                        <div style={{
+                            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                            backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1100,
+                            backdropFilter: 'blur(8px)', animation: 'fadeIn 0.3s ease'
+                        }}>
+                            <div style={{
+                                background: 'white', padding: '40px', borderRadius: '24px', width: '90%', maxWidth: '500px',
+                                boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)', animation: 'scaleUp 0.3s ease',
+                                maxHeight: '90vh', overflowY: 'auto'
+                            }}>
+                                <h2 style={{ margin: '0 0 10px 0', fontSize: '1.8rem', color: '#1e3a8a' }}>Join {clubToJoin.name}</h2>
+                                <p style={{ color: '#64748b', marginBottom: '25px', fontSize: '0.95rem' }}>Please provide a few details to complete your application.</p>
+
+                                <div style={{ display: 'grid', gap: '20px' }}>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                        <label style={{ fontSize: '0.85rem', fontWeight: 700, color: '#475569' }}>WHICH TEAM ARE YOU JOINING?</label>
+                                        <select
+                                            value={joinFormData.team}
+                                            onChange={e => setJoinFormData({ ...joinFormData, team: e.target.value })}
+                                            style={{ padding: '12px', borderRadius: '10px', border: '1px solid #e2e8f0', fontSize: '1rem', outline: 'none' }}
+                                        >
+                                            <option value="">Select a team...</option>
+                                            <option value="Technical">Technical</option>
+                                            <option value="Marketing">Marketing</option>
+                                            <option value="Events">Events</option>
+                                            <option value="Media & Design">Media & Design</option>
+                                            <option value="Logistics">Logistics</option>
+                                            <option value="Research & Development">Research & Development</option>
+                                            <option value="Other">Other</option>
+                                        </select>
+                                    </div>
+
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                        <label style={{ fontSize: '0.85rem', fontWeight: 700, color: '#475569' }}>TELL US ABOUT YOURSELF</label>
+                                        <textarea
+                                            placeholder="Introduce yourself briefly..."
+                                            value={joinFormData.description}
+                                            onChange={e => setJoinFormData({ ...joinFormData, description: e.target.value })}
+                                            style={{ padding: '12px', borderRadius: '10px', border: '1px solid #e2e8f0', fontSize: '1rem', minHeight: '80px', outline: 'none', resize: 'vertical' }}
+                                        />
+                                    </div>
+
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                        <label style={{ fontSize: '0.85rem', fontWeight: 700, color: '#475569' }}>YOUR SKILLS</label>
+                                        <input
+                                            type="text"
+                                            placeholder="e.g. React, UI Design, Content Writing"
+                                            value={joinFormData.skills}
+                                            onChange={e => setJoinFormData({ ...joinFormData, skills: e.target.value })}
+                                            style={{ padding: '12px', borderRadius: '10px', border: '1px solid #e2e8f0', fontSize: '1rem', outline: 'none' }}
+                                        />
+                                    </div>
+
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                        <label style={{ fontSize: '0.85rem', fontWeight: 700, color: '#475569' }}>REASON TO JOIN THIS TEAM</label>
+                                        <textarea
+                                            placeholder="Why do you want to join this specific team?"
+                                            value={joinFormData.reason}
+                                            onChange={e => setJoinFormData({ ...joinFormData, reason: e.target.value })}
+                                            style={{ padding: '12px', borderRadius: '10px', border: '1px solid #e2e8f0', fontSize: '1rem', minHeight: '80px', outline: 'none', resize: 'vertical' }}
+                                        />
+                                    </div>
+                                </div>
+
+                                <div style={{ display: 'flex', gap: '15px', marginTop: '30px' }}>
+                                    <button
+                                        onClick={() => setShowJoinForm(false)}
+                                        style={{ flex: 1, padding: '14px', borderRadius: '12px', border: '1px solid #e2e8f0', background: 'white', color: '#64748b', fontWeight: 600, cursor: 'pointer' }}
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        onClick={submitJoinForm}
+                                        disabled={joining}
+                                        style={{
+                                            flex: 2, padding: '14px', borderRadius: '12px', border: 'none',
+                                            background: joining ? '#94a3b8' : 'linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%)',
+                                            color: 'white', fontWeight: 600, cursor: joining ? 'not-allowed' : 'pointer'
+                                        }}
+                                    >
+                                        {joining ? 'Processing...' : 'Submit Application'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
 
