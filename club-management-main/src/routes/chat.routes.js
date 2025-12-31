@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 const express = require("express");
 const router = express.Router();
 const { verifyToken } = require("../middleware/auth");
@@ -98,10 +97,5 @@ router.get("/:teamId/messages", verifyToken, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-=======
-// chat routes placeholder
-const express = require("express");
-const router = express.Router();
->>>>>>> 1b01de9af77f472fa0faf6670c6b250ee70ee80e
 
 module.exports = router;

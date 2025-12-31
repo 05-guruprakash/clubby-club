@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 const express = require("express");
 const router = express.Router();
 const { verifyToken } = require("../middleware/auth");
@@ -13,27 +12,32 @@ const { notifyUser } = require("../services/notification.service");
  */
 router.post("/", verifyToken, async (req, res) => {
   try {
-    const { event_id, team_name, max_members } = req.body;
+    const { event_id, eventId, team_name, max_members } = req.body;
+    const finalEventId = eventId || event_id;
 
-    if (!event_id || !team_name || !max_members) {
+    if (!finalEventId || !team_name || !max_members) {
       return res.status(400).json({ error: "Missing fields" });
     }
 
     const teamRef = await db.collection("teams").add({
-    event_id,
-    team_name,
-    leader_id: req.user.uid,
-    members: [req.user.uid], // ✅ ADD THIS
-    max_members,
-    current_members: 1,
-    is_full: false,
-    created_at: new Date(),
+      eventId: finalEventId,
+      event_id: finalEventId, // Keep both for safety
+      team_name,
+      leaderId: req.user.uid,
+      leader_id: req.user.uid, // Keep both for safety
+      members: [req.user.uid],
+      max_members,
+      current_members: 1,
+      is_full: false,
+      created_at: new Date(),
     });
 
 
     // Add leader to team_members
     await db.collection("team_members").add({
+      teamId: teamRef.id,
       team_id: teamRef.id,
+      userId: req.user.uid,
       user_id: req.user.uid,
       role: "leader",
       joined_at: new Date(),
@@ -68,28 +72,32 @@ router.post("/:teamId/join", verifyToken, async (req, res) => {
 
       const team = teamSnap.data();
 
-      // ❌ Full team
+      // Full team
       if (team.is_full) {
         throw new Error("Team is already full");
       }
 
-      // ❌ Already member
-      if (team.members.includes(userId)) {
+      // Already member
+      const members = team.members || [];
+      if (members.includes(userId)) {
         throw new Error("Already in team");
       }
 
-      // ✅ Add member
+      // Add member
       tx.update(teamRef, {
         members: admin.firestore.FieldValue.arrayUnion(userId),
         current_members: admin.firestore.FieldValue.increment(1),
       });
 
       // Track membership
-      await db.collection("team_members").add({
+      tx.set(db.collection("team_members").doc(), {
+        teamId: teamId,
         team_id: teamId,
+        userId: userId,
         user_id: userId,
         role: "member",
         joined_at: new Date(),
+        status: 'accepted'
       });
 
       // Lock team if full
@@ -98,29 +106,26 @@ router.post("/:teamId/join", verifyToken, async (req, res) => {
       }
     });
 
-    // 🔔 Notifications AFTER transaction
+    // Notifications AFTER transaction
     const updatedTeam = await teamRef.get();
     const teamData = updatedTeam.data();
+    const leaderId = teamData.leaderId || teamData.leader_id;
 
-    await notifyUser(teamData.leader_id, {
-      type: "team_join",
-      message: "A new member joined your team",
-      reference_id: teamId,
-    });
-
-    if (teamData.is_full) {
-      await notifyUser(teamData.leader_id, {
-        type: "team_full",
-        message: "Your team is now full",
+    if (leaderId) {
+      await notifyUser(leaderId, {
+        type: "team_join",
+        message: "A new member joined your team",
         reference_id: teamId,
       });
+
+      if (teamData.is_full) {
+        await notifyUser(leaderId, {
+          type: "team_full",
+          message: "Your team is now full",
+          reference_id: teamId,
+        });
+      }
     }
-    await db
-    .collection("team_members")
-    .where("team_id", "==", teamId)
-    .where("user_id", "==", userId)
-    .get()
-    .then(snap => snap.forEach(doc => doc.ref.delete()));
 
     res.json({ message: "Joined team successfully" });
   } catch (err) {
@@ -142,12 +147,14 @@ router.post("/:teamId/leave", verifyToken, async (req, res) => {
     }
 
     const team = teamSnap.data();
+    const members = team.members || [];
+    const leaderId = team.leaderId || team.leader_id;
 
-    if (!team.members.includes(userId)) {
+    if (!members.includes(userId)) {
       return res.status(400).json({ error: "Not in team" });
     }
 
-    if (team.leader_id === userId) {
+    if (leaderId === userId) {
       return res.status(400).json({ error: "Leader cannot leave team" });
     }
 
@@ -157,11 +164,32 @@ router.post("/:teamId/leave", verifyToken, async (req, res) => {
       is_full: false,
     });
 
-    await notifyUser(team.leader_id, {
-    type: "team_leave",
-    message: "A member left your team",
-    reference_id: teamId,
-    });
+    // Remove from team_members collection
+    const membersSnap = await db
+      .collection("team_members")
+      .where("teamId", "==", teamId)
+      .where("userId", "==", userId)
+      .get();
+
+    // Also check for snake_case for completeness
+    const membersSnap2 = await db
+      .collection("team_members")
+      .where("team_id", "==", teamId)
+      .where("user_id", "==", userId)
+      .get();
+
+    const batch = db.batch();
+    membersSnap.forEach(doc => batch.delete(doc.ref));
+    membersSnap2.forEach(doc => batch.delete(doc.ref));
+    await batch.commit();
+
+    if (leaderId) {
+      await notifyUser(leaderId, {
+        type: "team_leave",
+        message: "A member left your team",
+        reference_id: teamId,
+      });
+    }
 
     res.json({ message: "Left team successfully" });
   } catch (err) {
@@ -171,18 +199,29 @@ router.post("/:teamId/leave", verifyToken, async (req, res) => {
 
 router.get("/", verifyToken, async (req, res) => {
   try {
-    const { event_id } = req.query;
+    const { event_id, eventId } = req.query;
+    const finalEventId = eventId || event_id;
 
-    if (!event_id) {
-      return res.status(400).json({ error: "event_id required" });
+    if (!finalEventId) {
+      return res.status(400).json({ error: "eventId required" });
     }
 
     const snap = await db
       .collection("teams")
-      .where("event_id", "==", event_id)
+      .where("eventId", "==", finalEventId)
       .get();
 
-    const teams = snap.docs.map(doc => ({
+    // If empty, try snake_case
+    let docs = snap.docs;
+    if (docs.length === 0) {
+      const snap2 = await db
+        .collection("teams")
+        .where("event_id", "==", finalEventId)
+        .get();
+      docs = snap2.docs;
+    }
+
+    const teams = docs.map(doc => ({
       id: doc.id,
       ...doc.data(),
     }));
@@ -192,26 +231,5 @@ router.get("/", verifyToken, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
-router.get("/:teamId/members", verifyToken, async (req, res) => {
-  try {
-    const { teamId } = req.params;
-
-    const snap = await db
-      .collection("team_members")
-      .where("team_id", "==", teamId)
-      .get();
-
-    const members = snap.docs.map(doc => doc.data());
-    res.json(members);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-=======
-// teams routes placeholder
-const express = require("express");
-const router = express.Router();
->>>>>>> 1b01de9af77f472fa0faf6670c6b250ee70ee80e
 
 module.exports = router;

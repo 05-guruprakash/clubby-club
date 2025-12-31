@@ -36,6 +36,7 @@ const AppContent = () => {
       {currentView === 'discover' && <Discover />}
       {currentView === 'clubs' && <Clubs />}
       {currentView === 'feed' && <Feed />}
+      {currentView === 'teams' && <Feed />}
       {currentView === 'notifications' && <Notifications />}
       {currentView === 'profile' && <Profile />}
 
