@@ -130,7 +130,8 @@ const Feed = () => {
 
             await updateDoc(doc(db, 'teams', team.id), {
                 members: team.members?.filter(m => m !== memberId),
-                current_members: increment(-1)
+                current_members: increment(-1),
+                isFull: false // Always set to false when someone is removed
             });
 
             setTeamMembers(prev => prev.filter(m => m.uid !== memberId));
@@ -187,14 +188,44 @@ const Feed = () => {
 
     const handleAccept = async (req: any) => {
         try {
+            // 1. Fetch latest team and event data
+            const teamRef = doc(db, 'teams', req.teamId);
+            const teamSnap = await getDoc(teamRef);
+            if (!teamSnap.exists()) {
+                alert("Team not found.");
+                return;
+            }
+            const teamData = teamSnap.data();
+            const currentMembers = teamData.current_members || 1;
+
+            const eventSnap = await getDoc(doc(db, 'events', teamData.eventId));
+            const maxMembers = eventSnap.data()?.maxTeamMembers || 4;
+
+            // 2. Strict capacity check
+            if (currentMembers >= maxMembers) {
+                alert(`Cannot accept: This team has reached the limit of ${maxMembers} members.`);
+                return;
+            }
+
+            // 3. Proceed with acceptance
             await updateDoc(doc(db, 'team_members', req.id), { status: 'accepted' });
-            await updateDoc(doc(db, 'teams', req.teamId), {
+
+            const newCount = currentMembers + 1;
+            await updateDoc(teamRef, {
                 members: arrayUnion(req.userId),
-                current_members: increment(1)
+                current_members: increment(1),
+                isFull: newCount >= maxMembers
             });
+
             alert("Accepted!");
             setRequests(prev => prev.filter(r => r.id !== req.id));
-        } catch (e) { console.error(e); }
+
+            // Re-fetch teams to update local state if needed (optional but good for UI)
+            // Or rely on the list refresh if tab changes
+        } catch (e) {
+            console.error(e);
+            alert("Error accepting request.");
+        }
     };
 
     const handleReject = async (reqId: string) => {
