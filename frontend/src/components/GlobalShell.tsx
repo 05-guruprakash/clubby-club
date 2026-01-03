@@ -81,7 +81,7 @@ const GlobalShell: FC<GlobalShellProps> = ({ children, setView, currentView, isD
                 background: 'transparent',
                 backdropFilter: 'blur(10px)'
             }}>
-                <div style={{ fontWeight: '900', fontSize: '1.8rem', letterSpacing: '4px', color: '#bcec15' }}>CLUBBY</div>
+                <div style={{ fontWeight: '900', fontSize: '1.8rem', letterSpacing: '4px', color: '#bcec15' }}>ClubOps</div>
 
                 <div style={{ display: 'flex', gap: '25px', alignItems: 'center' }}>
                     <button

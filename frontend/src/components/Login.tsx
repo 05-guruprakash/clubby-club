@@ -113,7 +113,7 @@ const Login = ({ onToggle, hideFooter, isNested, themeColor = '#bcec15', isDarkM
                         onClick={onToggle}
                         style={{ background: 'transparent', border: 'none', color: themeColor, cursor: 'pointer', padding: 0, fontWeight: '800', fontSize: '1.1rem' }}
                     >
-                        Join NEXUS
+                        Join ClubOps
                     </button>
                 </div>
             )}

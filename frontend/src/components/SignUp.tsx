@@ -175,7 +175,7 @@ const SignUp = ({ onToggle, hideFooter, isNested, themeColor = '#bcec15', isDark
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '0.85rem', color: isDarkMode ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0,0,0,0.5)' }}>
                     <input type="checkbox" checked={formData.termsAccepted} onChange={handleCheckboxChange} id="terms" required />
-                    <label htmlFor="terms">I agree to the NEXUS Terms & Privacy</label>
+                    <label htmlFor="terms">I agree to the ClubOps Terms & Privacy</label>
                 </div>
 
                 <button type="submit" disabled={loading} style={primaryButtonStyle}>{loading ? 'Creating...' : 'CREATE ACCOUNT'}</button>

@@ -190,7 +190,7 @@ const AdminTools = () => {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '20px' }}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                         <label style={{ fontSize: '0.9rem', fontWeight: '600', color: '#666' }}>Event Title</label>
-                        <input placeholder="e.g. Nexus Tech Fest 2025" style={inputStyle} value={eventName} onChange={e => setEventName(e.target.value)} />
+                        <input placeholder="e.g. ClubOps Tech Fest 2025" style={inputStyle} value={eventName} onChange={e => setEventName(e.target.value)} />
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                         <label style={{ fontSize: '0.9rem', fontWeight: '600', color: '#666' }}>Description</label>

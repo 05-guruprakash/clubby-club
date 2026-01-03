@@ -112,9 +112,9 @@ const Discover = () => {
 
         const icsContent = `BEGIN:VCALENDAR
         VERSION:2.0
-        PRODID:-//Clubby//Clubby Events//EN
+        PRODID:-//ClubOps//ClubOps Events//EN
         BEGIN:VEVENT
-        UID:${event.id}@clubby.com
+        UID:${event.id}@clubops.com
         DTSTAMP:${formatDate(new Date())}
         DTSTART:${formatDate(startDate)}
         DTEND:${formatDate(endDate)}
