@@ -38,12 +38,19 @@ const AppContent = () => {
 
 
 
+  // Theme State
+  const [isDarkMode, setIsDarkMode] = useState(true);
+  const toggleTheme = () => {
+    setIsDarkMode(!isDarkMode);
+    document.body.style.backgroundColor = !isDarkMode ? '#000' : '#f8f9fa';
+  };
+
   if (authLoading) return <div style={{ background: '#0f172a', color: 'white', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Loading...</div>;
 
   if (!user) {
     return (
       <div style={{ position: 'relative', width: '100vw', height: '100vh', overflow: 'hidden' }}>
-        <InteractiveGrid />
+        <InteractiveGrid isDarkMode={isDarkMode} />
         <div style={{
           position: 'absolute',
           top: 0,
@@ -55,7 +62,7 @@ const AppContent = () => {
           alignItems: 'center',
           zIndex: 1
         }}>
-          <AuthShell />
+          <AuthShell isDarkMode={isDarkMode} toggleTheme={toggleTheme} />
         </div>
       </div>
     );

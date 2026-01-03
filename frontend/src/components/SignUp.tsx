@@ -7,9 +7,11 @@ interface SignUpProps {
     onToggle: () => void;
     hideFooter?: boolean;
     isNested?: boolean;
+    themeColor?: string;
+    isDarkMode?: boolean;
 }
 
-const SignUp = ({ onToggle, hideFooter, isNested }: SignUpProps) => {
+const SignUp = ({ onToggle, hideFooter, isNested, themeColor = '#bcec15', isDarkMode = true }: SignUpProps) => {
     const [formData, setFormData] = useState({
         username: '',
         fullName: '',
@@ -90,27 +92,24 @@ const SignUp = ({ onToggle, hideFooter, isNested }: SignUpProps) => {
     };
 
     const glassStyle: React.CSSProperties = {
-        background: isNested ? 'transparent' : 'rgba(10, 10, 15, 0.85)',
-        border: isNested ? 'none' : '1px solid rgba(139, 92, 246, 0.3)',
-        boxShadow: isNested ? 'none' : '0 0 60px rgba(139, 92, 246, 0.15)',
-        borderRadius: '24px',
+        background: isNested ? 'transparent' : (isDarkMode ? 'rgba(10, 10, 15, 0.85)' : 'rgba(255, 255, 255, 0.9)'),
         padding: isNested ? '0' : '40px',
         width: '100%',
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'center',
         gap: '24px',
-        color: 'white',
-        backdropFilter: isNested ? 'none' : 'blur(20px)',
-        zIndex: 10
+        color: isDarkMode ? 'white' : '#1a1a1a',
+        zIndex: 10,
+        transition: 'all 0.4s'
     };
 
     const inputStyle: React.CSSProperties = {
-        background: 'rgba(255, 255, 255, 0.05)',
-        border: '1px solid rgba(255, 255, 255, 0.1)',
+        background: isDarkMode ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.03)',
+        border: `1px solid ${isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'}`,
         borderRadius: '12px',
         padding: '12px 18px',
-        color: 'white',
+        color: isDarkMode ? 'white' : '#1a1a1a',
         fontSize: '0.95rem',
         outline: 'none',
         transition: 'all 0.3s',
@@ -119,15 +118,15 @@ const SignUp = ({ onToggle, hideFooter, isNested }: SignUpProps) => {
     };
 
     const primaryButtonStyle: React.CSSProperties = {
-        background: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
-        color: 'white',
+        background: themeColor,
+        color: 'black',
         border: 'none',
         padding: '16px',
         borderRadius: '16px',
         fontSize: '1rem',
         fontWeight: '800',
         cursor: 'pointer',
-        boxShadow: '0 8px 20px rgba(139, 92, 246, 0.4)',
+        boxShadow: `0 8px 20px ${themeColor}4d`,
         transition: 'all 0.3s ease',
         width: '100%',
         textTransform: 'uppercase',
@@ -174,7 +173,7 @@ const SignUp = ({ onToggle, hideFooter, isNested }: SignUpProps) => {
                     <input name="confirmPassword" type="password" placeholder="Confirm" value={formData.confirmPassword} onChange={handleChange} required style={inputStyle} />
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '0.85rem', color: 'rgba(255, 255, 255, 0.4)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '0.85rem', color: isDarkMode ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0,0,0,0.5)' }}>
                     <input type="checkbox" checked={formData.termsAccepted} onChange={handleCheckboxChange} id="terms" required />
                     <label htmlFor="terms">I agree to the NEXUS Terms & Privacy</label>
                 </div>
@@ -183,13 +182,13 @@ const SignUp = ({ onToggle, hideFooter, isNested }: SignUpProps) => {
             </form>
 
             <div style={{ position: 'relative', textAlign: 'center' }}>
-                <div style={{ position: 'absolute', top: '50%', left: 0, width: '100%', height: '1px', background: 'rgba(255, 255, 255, 0.1)', zIndex: 0 }} />
-                <span style={{ position: 'relative', background: '#05050A', padding: '0 15px', color: 'rgba(255, 255, 255, 0.3)', fontSize: '0.9rem', fontWeight: 'bold' }}>OR</span>
+                <div style={{ position: 'absolute', top: '50%', left: 0, width: '100%', height: '1px', background: isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)', zIndex: 0 }} />
+                <span style={{ position: 'relative', background: isDarkMode ? '#05050A' : '#ffffff', padding: '0 15px', color: isDarkMode ? 'rgba(255, 255, 255, 0.3)' : 'rgba(0,0,0,0.3)', fontSize: '0.9rem', fontWeight: 'bold' }}>OR</span>
             </div>
 
             <button
                 onClick={handleGoogleSignUp}
-                style={{ ...inputStyle, background: 'white', color: 'black', fontWeight: '800', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', border: 'none' }}
+                style={{ ...inputStyle, background: isDarkMode ? 'white' : '#f0f0f0', color: 'black', fontWeight: '800', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', border: 'none' }}
             >
                 <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="20" height="20" alt="G" />
                 Sign up with Google
@@ -199,10 +198,10 @@ const SignUp = ({ onToggle, hideFooter, isNested }: SignUpProps) => {
 
             {!hideFooter && (
                 <div style={{ textAlign: 'center' }}>
-                    <span style={{ color: 'rgba(255, 255, 255, 0.4)', fontSize: '1rem' }}>Already joined? </span>
+                    <span style={{ color: isDarkMode ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0,0,0,0.4)', fontSize: '1rem' }}>Already joined? </span>
                     <button
                         onClick={onToggle}
-                        style={{ background: 'transparent', border: 'none', color: '#8b5cf6', cursor: 'pointer', padding: 0, fontWeight: '800', fontSize: '1rem' }}
+                        style={{ background: 'transparent', border: 'none', color: themeColor, cursor: 'pointer', padding: 0, fontWeight: '800', fontSize: '1rem' }}
                     >
                         Sign In
                     </button>

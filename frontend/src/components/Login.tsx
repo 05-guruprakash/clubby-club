@@ -6,9 +6,11 @@ interface LoginProps {
     onToggle: () => void;
     hideFooter?: boolean;
     isNested?: boolean;
+    themeColor?: string;
+    isDarkMode?: boolean;
 }
 
-const Login = ({ onToggle, hideFooter, isNested }: LoginProps) => {
+const Login = ({ onToggle, hideFooter, isNested, themeColor = '#bcec15', isDarkMode = true }: LoginProps) => {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState<string | null>(null);
@@ -36,27 +38,24 @@ const Login = ({ onToggle, hideFooter, isNested }: LoginProps) => {
     };
 
     const glassStyle: React.CSSProperties = {
-        background: isNested ? 'transparent' : 'rgba(10, 10, 15, 0.85)',
-        border: isNested ? 'none' : '1px solid rgba(139, 92, 246, 0.3)',
-        boxShadow: isNested ? 'none' : '0 0 60px rgba(139, 92, 246, 0.15)',
-        borderRadius: '24px',
+        background: isNested ? 'transparent' : (isDarkMode ? 'rgba(10, 10, 15, 0.85)' : 'rgba(255, 255, 255, 0.9)'),
         padding: isNested ? '0' : '50px 40px',
         width: '100%',
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'center',
         gap: '30px',
-        color: 'white',
-        backdropFilter: isNested ? 'none' : 'blur(20px)',
-        zIndex: 10
+        color: isDarkMode ? 'white' : '#1a1a1a',
+        zIndex: 10,
+        transition: 'all 0.4s'
     };
 
     const inputStyle: React.CSSProperties = {
-        background: 'rgba(255, 255, 255, 0.05)',
-        border: '1px solid rgba(255, 255, 255, 0.1)',
+        background: isDarkMode ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.03)',
+        border: `1px solid ${isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'}`,
         borderRadius: '16px',
         padding: '18px 24px',
-        color: 'white',
+        color: isDarkMode ? 'white' : '#1a1a1a',
         fontSize: '1.1rem',
         outline: 'none',
         transition: 'all 0.3s ease',
@@ -65,15 +64,15 @@ const Login = ({ onToggle, hideFooter, isNested }: LoginProps) => {
     };
 
     const primaryButtonStyle: React.CSSProperties = {
-        background: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
-        color: 'white',
+        background: themeColor,
+        color: 'black',
         border: 'none',
         padding: '20px',
         borderRadius: '16px',
         fontSize: '1.1rem',
-        fontWeight: '800',
+        fontWeight: '900',
         cursor: 'pointer',
-        boxShadow: '0 10px 25px rgba(139, 92, 246, 0.4)',
+        boxShadow: `0 10px 25px ${themeColor}4d`,
         transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
         width: '100%',
         textTransform: 'uppercase',
@@ -93,13 +92,13 @@ const Login = ({ onToggle, hideFooter, isNested }: LoginProps) => {
             </form>
 
             <div style={{ position: 'relative', textAlign: 'center' }}>
-                <div style={{ position: 'absolute', top: '50%', left: 0, width: '100%', height: '1px', background: 'rgba(255, 255, 255, 0.1)', zIndex: 0 }} />
-                <span style={{ position: 'relative', background: '#05050A', padding: '0 15px', color: 'rgba(255, 255, 255, 0.3)', fontSize: '0.9rem', fontWeight: 'bold' }}>OR</span>
+                <div style={{ position: 'absolute', top: '50%', left: 0, width: '100%', height: '1px', background: isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)', zIndex: 0 }} />
+                <span style={{ position: 'relative', background: isDarkMode ? '#05050A' : '#ffffff', padding: '0 15px', color: isDarkMode ? 'rgba(255, 255, 255, 0.3)' : 'rgba(0,0,0,0.3)', fontSize: '0.9rem', fontWeight: 'bold' }}>OR</span>
             </div>
 
             <button
                 onClick={handleGoogleLogin}
-                style={{ ...inputStyle, background: 'white', color: 'black', fontWeight: '800', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '15px', border: 'none' }}
+                style={{ ...inputStyle, background: isDarkMode ? 'white' : '#f0f0f0', color: 'black', fontWeight: '800', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '15px', border: 'none' }}
             >
                 <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="24" height="24" alt="G" />
                 Continue with Google
@@ -109,10 +108,10 @@ const Login = ({ onToggle, hideFooter, isNested }: LoginProps) => {
 
             {!hideFooter && (
                 <div style={{ textAlign: 'center' }}>
-                    <span style={{ color: 'rgba(255, 255, 255, 0.4)', fontSize: '1.1rem' }}>No account? </span>
+                    <span style={{ color: isDarkMode ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0,0,0,0.4)', fontSize: '1.1rem' }}>No account? </span>
                     <button
                         onClick={onToggle}
-                        style={{ background: 'transparent', border: 'none', color: '#8b5cf6', cursor: 'pointer', padding: 0, fontWeight: '800', fontSize: '1.1rem' }}
+                        style={{ background: 'transparent', border: 'none', color: themeColor, cursor: 'pointer', padding: 0, fontWeight: '800', fontSize: '1.1rem' }}
                     >
                         Join NEXUS
                     </button>
