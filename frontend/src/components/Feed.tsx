@@ -192,7 +192,7 @@ const Feed = ({ isDarkMode }: { isDarkMode: boolean }) => {
 
 
     return (
-        <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '20px', minHeight: '90vh' }}>
+        <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '20px' }}>
             {/* Header Section */}
             <div style={{ marginBottom: '40px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
                 <div>
@@ -273,7 +273,7 @@ const Feed = ({ isDarkMode }: { isDarkMode: boolean }) => {
 
             {/* TAB CONTENT: MY TEAMS */}
             {tab === 'team' && (
-                <div style={{ display: 'grid', gridTemplateColumns: '350px 1fr', gap: '30px', height: 'calc(100vh - 280px)', minHeight: '600px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '350px 1fr', gap: '30px', height: 'calc(100vh - 360px)', minHeight: '400px' }}>
                     {/* Left Panel: Team List & Info */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
                         <div style={{
@@ -389,7 +389,7 @@ const Feed = ({ isDarkMode }: { isDarkMode: boolean }) => {
                                         ACTIVE CHAT
                                     </div>
                                 </div>
-                                <div style={{ flex: 1, position: 'relative' }}>
+                                <div style={{ flex: 1, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                                     <ChatRoom communityId={selectedTeamId} type="team" isDarkMode={isDarkMode} />
                                 </div>
                             </>
@@ -407,7 +407,7 @@ const Feed = ({ isDarkMode }: { isDarkMode: boolean }) => {
 
             {/* TAB CONTENT: OFFICIAL EVENTS */}
             {tab === 'events' && (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr', height: '75vh' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr', height: 'calc(100vh - 360px)', minHeight: '400px' }}>
                     <div style={{
                         background: 'rgba(255,255,255,0.02)',
                         borderRadius: '32px',
@@ -469,7 +469,7 @@ const Feed = ({ isDarkMode }: { isDarkMode: boolean }) => {
                             </div>
                         </div>
 
-                        <div style={{ flex: 1, position: 'relative' }}>
+                        <div style={{ flex: 1, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                             <ChatRoom
                                 key={selectedEventTab}
                                 communityId={selectedEventTab === 'all' ? 'official_event_feed' : selectedEventTab}
@@ -483,7 +483,7 @@ const Feed = ({ isDarkMode }: { isDarkMode: boolean }) => {
 
             {/* TAB CONTENT: COMMUNITY */}
             {tab === 'club' && (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr', height: '75vh' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr', height: 'calc(100vh - 360px)', minHeight: '400px' }}>
                     <div style={{
                         background: 'rgba(255,255,255,0.02)',
                         borderRadius: '32px',
@@ -502,7 +502,7 @@ const Feed = ({ isDarkMode }: { isDarkMode: boolean }) => {
                                 <span style={{ fontSize: '0.7rem', fontWeight: '900' }}>LIVE CHAT</span>
                             </div>
                         </div>
-                        <div style={{ flex: 1, position: 'relative' }}>
+                        <div style={{ flex: 1, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                             <ChatRoom communityId="global_club_community" type="club" isDarkMode={isDarkMode} />
                         </div>
                     </div>
@@ -511,17 +511,17 @@ const Feed = ({ isDarkMode }: { isDarkMode: boolean }) => {
 
             <style>{`
                 ::-webkit-scrollbar {
-                    width: 6px;
+                    width: 8px;
                 }
                 ::-webkit-scrollbar-track {
                     background: transparent;
                 }
                 ::-webkit-scrollbar-thumb {
-                    background: rgba(255,255,255,0.1);
+                    background: rgba(188, 236, 21, 0.2);
                     border-radius: 10px;
                 }
                 ::-webkit-scrollbar-thumb:hover {
-                    background: rgba(255,255,255,0.2);
+                    background: rgba(188, 236, 21, 0.4);
                 }
             `}</style>
         </div>

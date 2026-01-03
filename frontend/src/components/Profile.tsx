@@ -419,15 +419,17 @@ const Profile = ({ setView, isDarkMode = true }: ProfileProps) => {
                                 <input
                                     style={{
                                         width: '100%',
+                                        height: '58px',
                                         background: isDarkMode ? 'rgba(255,255,255,0.03)' : '#f9f9f9',
                                         border: `1px solid ${theme.border}`,
                                         color: theme.text,
-                                        padding: '16px 20px',
-                                        borderRadius: '20px',
-                                        fontSize: '0.9rem',
+                                        padding: '0 24px',
+                                        borderRadius: '18px',
+                                        fontSize: '0.95rem',
                                         fontWeight: '600',
                                         outline: 'none',
-                                        transition: '0.3s ease'
+                                        transition: '0.3s ease',
+                                        boxSizing: 'border-box'
                                     }}
                                     value={(editForm as any)[field.key] || ''}
                                     onChange={e => setEditForm({ ...editForm, [field.key]: e.target.value })}
@@ -444,26 +446,30 @@ const Profile = ({ setView, isDarkMode = true }: ProfileProps) => {
                             }}>AVATAR UPLOAD (MAX 10MB)</label>
                             <label style={{
                                 width: '100%',
+                                height: '58px',
                                 display: 'flex',
                                 alignItems: 'center',
+                                justifyContent: 'center',
                                 gap: '12px',
                                 background: isDarkMode ? 'rgba(188, 236, 21, 0.05)' : '#f0f0f0',
                                 border: `1px dashed ${theme.accent}66`,
                                 color: theme.text,
-                                padding: '14px 20px',
-                                borderRadius: '20px',
+                                padding: '0 24px',
+                                borderRadius: '18px',
                                 fontSize: '0.85rem',
-                                fontWeight: '700',
+                                fontWeight: '900',
                                 cursor: 'pointer',
-                                transition: '0.3s'
+                                transition: '0.3s',
+                                boxSizing: 'border-box',
+                                letterSpacing: '1px'
                             }}>
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                                     <polyline points="17 8 12 3 7 8" />
                                     <line x1="12" y1="3" x2="12" y2="15" />
                                 </svg>
                                 <span style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
-                                    {selectedFile ? selectedFile.name : 'CHOOSE PHOTO'}
+                                    {selectedFile ? selectedFile.name.toUpperCase() : 'CHOOSE PHOTO'}
                                 </span>
                                 <input type="file" accept="image/*" onChange={handleFileChange} style={{ display: 'none' }} />
                             </label>
@@ -475,10 +481,18 @@ const Profile = ({ setView, isDarkMode = true }: ProfileProps) => {
                             onClick={handleSave}
                             disabled={uploading}
                             style={{
-                                padding: '18px', borderRadius: '22px',
-                                background: uploading ? theme.subtext : theme.accent, color: '#000',
-                                fontWeight: '950', border: 'none', cursor: 'pointer', fontSize: '0.9rem',
-                                transition: '0.3s', opacity: uploading ? 0.7 : 1
+                                height: '58px',
+                                borderRadius: '18px',
+                                background: uploading ? theme.subtext : theme.accent,
+                                color: '#000',
+                                fontWeight: '950',
+                                border: 'none',
+                                cursor: 'pointer',
+                                fontSize: '0.9rem',
+                                transition: '0.3s',
+                                opacity: uploading ? 0.7 : 1,
+                                boxSizing: 'border-box',
+                                letterSpacing: '0.5px'
                             }}
                         >{uploading ? 'UPLOADING...' : 'SAVE UPDATES'}</button>
                         <button
@@ -488,10 +502,17 @@ const Profile = ({ setView, isDarkMode = true }: ProfileProps) => {
                                 setPreviewUrl(null);
                             }}
                             style={{
-                                padding: '18px', borderRadius: '22px',
-                                background: 'transparent', color: theme.text,
-                                fontWeight: '900', border: `1px solid ${theme.border}`, cursor: 'pointer', fontSize: '0.9rem',
-                                transition: '0.3s'
+                                height: '58px',
+                                borderRadius: '18px',
+                                background: 'transparent',
+                                color: theme.text,
+                                fontWeight: '900',
+                                border: `1px solid ${theme.border}`,
+                                cursor: 'pointer',
+                                fontSize: '0.9rem',
+                                transition: '0.3s',
+                                boxSizing: 'border-box',
+                                letterSpacing: '0.5px'
                             }}
                         >CANCEL</button>
                     </div>

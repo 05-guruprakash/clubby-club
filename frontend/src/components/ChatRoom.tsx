@@ -1,4 +1,4 @@
-import { useEffect, useState, type FC } from 'react';
+import { useEffect, useState, useRef, type FC } from 'react';
 import { collection, addDoc, onSnapshot, query, where, serverTimestamp, getDoc, doc, arrayUnion, arrayRemove, setDoc } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 import { useAuth } from '../AuthContext';
@@ -40,6 +40,15 @@ const ChatRoom: FC<ChatRoomProps> = ({ communityId, type, isDarkMode }) => {
     const [expandedComments, setExpandedComments] = useState<Set<string>>(new Set());
     const [isServerAlive, setIsServerAlive] = useState<boolean | null>(null);
     const [selectedUserProfile, setSelectedUserProfile] = useState<any | null>(null);
+    const messagesEndRef = useRef<HTMLDivElement>(null);
+
+    const scrollToBottom = () => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    };
+
+    useEffect(() => {
+        scrollToBottom();
+    }, [messages]);
 
     // Ping server to check connectivity
     useEffect(() => {
@@ -477,7 +486,9 @@ const ChatRoom: FC<ChatRoomProps> = ({ communityId, type, isDarkMode }) => {
                 flexDirection: 'column',
                 gap: '24px',
                 scrollBehavior: 'smooth'
-            }}>
+            }}
+                className="messages-scroll-area"
+            >
                 {messages.length === 0 ? (
                     <div style={{
                         flex: 1,
@@ -656,6 +667,7 @@ const ChatRoom: FC<ChatRoomProps> = ({ communityId, type, isDarkMode }) => {
                         );
                     })
                 )}
+                <div ref={messagesEndRef} />
             </div>
 
             {/* Input Area */}
@@ -785,6 +797,20 @@ const ChatRoom: FC<ChatRoomProps> = ({ communityId, type, isDarkMode }) => {
                 @keyframes messageSlide { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
                 @keyframes zoomIn { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
                 .chat-input:focus { border-color: #bcec15 !important; box-shadow: 0 0 20px rgba(188, 236, 21, 0.1); }
+                
+                .messages-scroll-area::-webkit-scrollbar {
+                    width: 8px;
+                }
+                .messages-scroll-area::-webkit-scrollbar-track {
+                    background: transparent;
+                }
+                .messages-scroll-area::-webkit-scrollbar-thumb {
+                    background: rgba(188, 236, 21, 0.15);
+                    border-radius: 10px;
+                }
+                .messages-scroll-area::-webkit-scrollbar-thumb:hover {
+                    background: rgba(188, 236, 21, 0.3);
+                }
             `}</style>
         </div>
     );
