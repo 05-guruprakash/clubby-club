@@ -1,20 +1,16 @@
 import { useState, type FormEvent } from 'react';
-import { signInWithEmailAndPassword, GoogleAuthProvider, signInWithPopup, RecaptchaVerifier, signInWithPhoneNumber, type ConfirmationResult } from 'firebase/auth';
+import { signInWithEmailAndPassword, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { auth } from '../firebaseConfig';
 
-declare global {
-    interface Window {
-        recaptchaVerifier: RecaptchaVerifier;
-    }
+interface LoginProps {
+    onToggle: () => void;
+    hideFooter?: boolean;
+    isNested?: boolean;
 }
 
-const Login = () => {
-    const [method, setMethod] = useState<'email' | 'phone'>('email');
+const Login = ({ onToggle, hideFooter, isNested }: LoginProps) => {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
-    const [phone, setPhone] = useState('');
-    const [otp, setOtp] = useState('');
-    const [confirmResult, setConfirmResult] = useState<ConfirmationResult | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
 
@@ -30,132 +26,98 @@ const Login = () => {
     const handleEmailLogin = async (e: FormEvent) => {
         e.preventDefault();
         setError(null);
+        setLoading(true);
         try {
             await signInWithEmailAndPassword(auth, email, password);
         } catch (err: any) {
             setError(err.message);
-        }
-    };
-
-    const setupRecaptcha = () => {
-        if (!window.recaptchaVerifier) {
-            window.recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
-                'size': 'normal',
-                'callback': () => {
-                    // reCAPTCHA solved
-                },
-                'expired-callback': () => {
-                    setError('Recaptcha expired. Please try again.');
-                }
-            });
-        }
-    };
-
-    const requestOtp = async (e: FormEvent) => {
-        e.preventDefault();
-        setError(null);
-        setLoading(true);
-        setupRecaptcha();
-        const appVerifier = window.recaptchaVerifier;
-        try {
-            // Ensure phone number has country code if not present, e.g. +91
-            const formattedPhone = phone.startsWith('+') ? phone : `+91${phone}`;
-            const confirmation = await signInWithPhoneNumber(auth, formattedPhone, appVerifier);
-            setConfirmResult(confirmation);
-            setLoading(false);
-        } catch (err: any) {
-            setLoading(false);
-            setError(err.message);
-            // Reset recaptcha
-            if (window.recaptchaVerifier) {
-                window.recaptchaVerifier.clear();
-                // @ts-ignore
-                window.recaptchaVerifier = null;
-            }
-        }
-    };
-
-    const verifyOtp = async (e: FormEvent) => {
-        e.preventDefault();
-        if (!confirmResult) return;
-        setLoading(true);
-        try {
-            await confirmResult.confirm(otp);
-        } catch (err: any) {
-            setError(err.message);
             setLoading(false);
         }
     };
 
-    const inputStyle = { padding: '10px', borderRadius: '6px', border: '1px solid #ccc' };
-    const btnStyle = { padding: '10px', borderRadius: '6px', border: 'none', cursor: 'pointer', fontWeight: 'bold' };
+    const glassStyle: React.CSSProperties = {
+        background: isNested ? 'transparent' : 'rgba(10, 10, 15, 0.85)',
+        border: isNested ? 'none' : '1px solid rgba(139, 92, 246, 0.3)',
+        boxShadow: isNested ? 'none' : '0 0 60px rgba(139, 92, 246, 0.15)',
+        borderRadius: '24px',
+        padding: isNested ? '0' : '50px 40px',
+        width: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'center',
+        gap: '30px',
+        color: 'white',
+        backdropFilter: isNested ? 'none' : 'blur(20px)',
+        zIndex: 10
+    };
+
+    const inputStyle: React.CSSProperties = {
+        background: 'rgba(255, 255, 255, 0.05)',
+        border: '1px solid rgba(255, 255, 255, 0.1)',
+        borderRadius: '16px',
+        padding: '18px 24px',
+        color: 'white',
+        fontSize: '1.1rem',
+        outline: 'none',
+        transition: 'all 0.3s ease',
+        width: '100%',
+        boxSizing: 'border-box'
+    };
+
+    const primaryButtonStyle: React.CSSProperties = {
+        background: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
+        color: 'white',
+        border: 'none',
+        padding: '20px',
+        borderRadius: '16px',
+        fontSize: '1.1rem',
+        fontWeight: '800',
+        cursor: 'pointer',
+        boxShadow: '0 10px 25px rgba(139, 92, 246, 0.4)',
+        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+        width: '100%',
+        textTransform: 'uppercase',
+        letterSpacing: '1px'
+    };
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxWidth: '300px' }}>
-            <h3>Login</h3>
-
-            <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
-                <button
-                    onClick={() => setMethod('email')}
-                    style={{ ...btnStyle, flex: 1, background: method === 'email' ? '#646cff' : '#eee', color: method === 'email' ? 'white' : 'black' }}
-                >
-                    Email
-                </button>
-                <button
-                    onClick={() => setMethod('phone')}
-                    style={{ ...btnStyle, flex: 1, background: method === 'phone' ? '#646cff' : '#eee', color: method === 'phone' ? 'white' : 'black' }}
-                >
-                    Phone
-                </button>
+        <div style={glassStyle}>
+            <div style={{ textAlign: 'center', width: '100%' }}>
+                <h1 style={{ fontSize: '3.5rem', fontWeight: '900', marginBottom: '24px', letterSpacing: '-2px' }}>LOGIN</h1>
             </div>
 
-            {method === 'email' ? (
-                <form onSubmit={handleEmailLogin} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    <input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required style={inputStyle} />
-                    <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required style={inputStyle} />
-                    <button type="submit" style={{ ...btnStyle, background: '#1a1a1a', color: 'white' }}>Login with Email</button>
-                </form>
-            ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    {!confirmResult ? (
-                        <form onSubmit={requestOtp} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                            <input
-                                placeholder="Phone (e.g. 9876543210)"
-                                value={phone}
-                                onChange={(e) => setPhone(e.target.value)}
-                                required
-                                style={inputStyle}
-                            />
-                            <div id="recaptcha-container"></div>
-                            <button type="submit" disabled={loading} style={{ ...btnStyle, background: '#1a1a1a', color: 'white' }}>
-                                {loading ? 'Sending OTP...' : 'Send OTP'}
-                            </button>
-                        </form>
-                    ) : (
-                        <form onSubmit={verifyOtp} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                            <input
-                                placeholder="Enter OTP"
-                                value={otp}
-                                onChange={(e) => setOtp(e.target.value)}
-                                required
-                                style={inputStyle}
-                            />
-                            <button type="submit" disabled={loading} style={{ ...btnStyle, background: '#1a1a1a', color: 'white' }}>
-                                {loading ? 'Verifying...' : 'Verify OTP'}
-                            </button>
-                            <button type="button" onClick={() => setConfirmResult(null)} style={{ background: 'transparent', border: 'none', color: '#666', cursor: 'pointer' }}>
-                                Change Number
-                            </button>
-                        </form>
-                    )}
-                </div>
-            )}
+            <form onSubmit={handleEmailLogin} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                <input type="email" placeholder="Email Address" value={email} onChange={(e) => setEmail(e.target.value)} required style={inputStyle} />
+                <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required style={inputStyle} />
+                <button type="submit" disabled={loading} style={primaryButtonStyle}>{loading ? 'Authenticating...' : 'LOG IN'}</button>
+            </form>
 
-            <button type="button" onClick={handleGoogleLogin} style={{ ...btnStyle, background: '#4285F4', color: 'white', marginTop: '10px' }}>
-                Sign in with Google
+            <div style={{ position: 'relative', textAlign: 'center' }}>
+                <div style={{ position: 'absolute', top: '50%', left: 0, width: '100%', height: '1px', background: 'rgba(255, 255, 255, 0.1)', zIndex: 0 }} />
+                <span style={{ position: 'relative', background: '#05050A', padding: '0 15px', color: 'rgba(255, 255, 255, 0.3)', fontSize: '0.9rem', fontWeight: 'bold' }}>OR</span>
+            </div>
+
+            <button
+                onClick={handleGoogleLogin}
+                style={{ ...inputStyle, background: 'white', color: 'black', fontWeight: '800', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '15px', border: 'none' }}
+            >
+                <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="24" height="24" alt="G" />
+                Continue with Google
             </button>
 
-            {error && <div style={{ color: 'red', fontSize: '0.9rem' }}>{error}</div>}
+            {error && <div style={{ color: '#ef4444', fontSize: '1rem', textAlign: 'center', background: 'rgba(239, 68, 68, 0.1)', padding: '16px', borderRadius: '16px', fontWeight: '500' }}>{error}</div>}
+
+            {!hideFooter && (
+                <div style={{ textAlign: 'center' }}>
+                    <span style={{ color: 'rgba(255, 255, 255, 0.4)', fontSize: '1.1rem' }}>No account? </span>
+                    <button
+                        onClick={onToggle}
+                        style={{ background: 'transparent', border: 'none', color: '#8b5cf6', cursor: 'pointer', padding: 0, fontWeight: '800', fontSize: '1.1rem' }}
+                    >
+                        Join NEXUS
+                    </button>
+                </div>
+            )}
         </div>
     );
 };

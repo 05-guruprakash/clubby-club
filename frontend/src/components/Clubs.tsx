@@ -187,8 +187,8 @@ const Clubs = () => {
                     const uq = query(collection(db, 'users'), where('joined_clubs', 'array-contains', selectedClub.id));
 
                     const [mSnap, uSnap] = await Promise.all([
-                        getDocs(mq).catch(e => ({ docs: [] } as any)),
-                        getDocs(uq).catch(e => ({ docs: [] } as any))
+                        getDocs(mq).catch(() => ({ docs: [] } as any)),
+                        getDocs(uq).catch(() => ({ docs: [] } as any))
                     ]);
 
                     // OLD LOGIC REPLACED BELOW

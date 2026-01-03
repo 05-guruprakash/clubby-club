@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './AuthContext';
-import Login from './components/Login';
-import SignUp from './components/SignUp';
+import AuthShell from './components/AuthShell';
 import Discover from './components/Discover';
 
 import Notifications from './components/Notifications';
@@ -12,6 +11,7 @@ import GlobalShell from './components/GlobalShell';
 import ProfileSetup from './components/ProfileSetup';
 import { db } from './firebaseConfig';
 import { doc, onSnapshot } from 'firebase/firestore';
+import InteractiveGrid from './components/InteractiveGrid';
 import './App.css';
 
 const AppContent = () => {
@@ -36,16 +36,26 @@ const AppContent = () => {
     }
   }, [user]);
 
-  if (authLoading) return <div>Loading...</div>;
+
+
+  if (authLoading) return <div style={{ background: '#0f172a', color: 'white', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Loading...</div>;
 
   if (!user) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginTop: '50px' }}>
-        <h1>Welcome to NEXUS</h1>
-        <div style={{ display: 'flex', gap: '50px' }}>
-          <Login />
-          <div style={{ borderLeft: '1px solid black' }}></div>
-          <SignUp />
+      <div style={{ position: 'relative', width: '100vw', height: '100vh', overflow: 'hidden' }}>
+        <InteractiveGrid />
+        <div style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 1
+        }}>
+          <AuthShell />
         </div>
       </div>
     );
