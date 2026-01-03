@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { collection, query, where, getDocs, doc, getDoc, updateDoc, deleteDoc, arrayUnion, increment } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, getDoc, updateDoc, deleteDoc, arrayUnion, increment, documentId } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 import { useAuth } from '../AuthContext';
 import ChatRoom from './ChatRoom';
@@ -24,7 +24,7 @@ const Feed = () => {
     const [myTeams, setMyTeams] = useState<Team[]>([]);
     const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
     const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
-    const [requests, setRequests] = useState<any[]>([]);
+    // Requests removed from here - managed in Discover.tsx only
     const [currentEventName, setCurrentEventName] = useState('');
     const [selectedEventTab, setSelectedEventTab] = useState<'all' | string>('all');
     const [joinedEvents, setJoinedEvents] = useState<{ id: string, title: string }[]>([]);
@@ -76,33 +76,37 @@ const Feed = () => {
             if (!selectedTeamId || !user) return;
             const team = myTeams.find(t => t.id === selectedTeamId);
 
-            // 1. Fetch Members
-            if (team && team.members && team.members.length > 0) {
+            // 1. Fetch Members Optimized
+            if (team && team.members && Array.isArray(team.members) && team.members.length > 0) {
                 try {
-                    const promises = team.members.map(uid => getDoc(doc(db, 'users', uid)));
-                    const docs = await Promise.all(promises);
-                    const membersData = docs.map(d => ({
+                    // Sanitize IDs: Remove duplicates and ensure valid strings
+                    const uniqueIds = [...new Set(team.members)].filter(id => id && typeof id === 'string');
+
+                    if (uniqueIds.length === 0) {
+                        setTeamMembers([]);
+                        return;
+                    }
+
+                    // Use '__name__' instead of documentId() for better compatibility
+                    // Limit to 10 for absolute safety across all SDK versions
+                    const qMembers = query(collection(db, 'users'), where('__name__', 'in', uniqueIds.slice(0, 10)));
+                    const docsSnap = await getDocs(qMembers);
+
+                    const membersData = docsSnap.docs.map(d => ({
                         uid: d.id,
                         name: d.data()?.username || d.data()?.email || 'Unknown',
                         role: d.id === (team as any).leaderId ? 'Leader' : 'Member'
                     }));
                     setTeamMembers(membersData);
-                } catch (e) { console.error(e); }
+                } catch (e) {
+                    console.error("Member fetch error:", e);
+                    setTeamMembers([]);
+                }
             } else {
                 setTeamMembers([]);
             }
 
-            // 2. Fetch Requests (If Leader)
-            if (team && team.leaderId === user.uid) {
-                try {
-                    const q = query(collection(db, 'team_members'), where('teamId', '==', selectedTeamId), where('status', '==', 'pending'));
-                    const snap = await getDocs(q);
-                    const reqs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-                    setRequests(reqs);
-                } catch (e) { console.error(e); }
-            } else {
-                setRequests([]);
-            }
+
         };
 
         if (tab === 'team' && selectedTeamId) {
@@ -185,25 +189,7 @@ const Feed = () => {
         }
     };
 
-    const handleAccept = async (req: any) => {
-        try {
-            await updateDoc(doc(db, 'team_members', req.id), { status: 'accepted' });
-            await updateDoc(doc(db, 'teams', req.teamId), {
-                members: arrayUnion(req.userId),
-                current_members: increment(1)
-            });
-            alert("Accepted!");
-            setRequests(prev => prev.filter(r => r.id !== req.id));
-        } catch (e) { console.error(e); }
-    };
 
-    const handleReject = async (reqId: string) => {
-        try {
-            await updateDoc(doc(db, 'team_members', reqId), { status: 'rejected' });
-            alert("Rejected.");
-            setRequests(prev => prev.filter(r => r.id !== reqId));
-        } catch (e) { console.error(e); }
-    };
 
     return (
         <div style={{ maxWidth: '1400px', margin: '0 auto', color: 'white' }}>
@@ -294,24 +280,6 @@ const Feed = () => {
 
                     {/* Right: Sidebar */}
                     <div style={{ flex: 1, paddingLeft: '20px', overflowY: 'auto' }}>
-                        {/* Requests Section */}
-                        {requests.length > 0 && (
-                            <div style={{ marginBottom: '20px', borderBottom: '1px solid #555', paddingBottom: '10px' }}>
-                                <h3 style={{ color: 'orange' }}>Join Requests</h3>
-                                <ul style={{ listStyle: 'none', padding: 0 }}>
-                                    {requests.map(req => (
-                                        <li key={req.id} style={{ marginBottom: '10px', background: 'rgba(255,255,255,0.05)', padding: '10px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)' }}>
-                                            <div style={{ fontSize: '0.9rem', fontWeight: 'bold', color: 'white' }}>{req.userName || req.userId}</div>
-                                            <div style={{ marginTop: '8px', display: 'flex', gap: '8px' }}>
-                                                <button onClick={() => handleAccept(req)} style={{ flex: 1, background: '#10b981', color: 'white', border: 'none', padding: '5px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>Accept</button>
-                                                <button onClick={() => handleReject(req.id)} style={{ flex: 1, background: '#ef4444', color: 'white', border: 'none', padding: '5px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>Reject</button>
-                                            </div>
-                                        </li>
-                                    ))}
-                                </ul>
-                            </div>
-                        )}
-
                         <h3 style={{ color: 'white' }}>Team Members</h3>
                         <ul style={{ listStyle: 'none', padding: 0 }}>
                             {teamMembers.map(m => (
