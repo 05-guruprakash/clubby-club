@@ -132,13 +132,7 @@ const AdminTools = () => {
         } catch (e) { console.error(e); }
     };
 
-    const handlePromoteMember = async () => {
-        if (!targetUserId) return;
-        try {
-            await updateDoc(doc(db, 'users', targetUserId), { role: 'event_head' });
-            alert('Member promoted to event_head!');
-        } catch (e) { console.error(e); }
-    };
+
 
     const glassStyle: any = {
         background: 'rgba(255, 255, 255, 0.95)',
@@ -266,13 +260,6 @@ const AdminTools = () => {
                         <input placeholder="Team ID" value={targetTeamId} onChange={e => setTargetTeamId(e.target.value)} style={inputStyle} />
                         <input placeholder="User ID" value={targetUserId} onChange={e => setTargetUserId(e.target.value)} style={inputStyle} />
                         <button onClick={handleApproveMember} style={{ ...buttonStyle, background: '#6c5ce7', color: 'white', width: '100%' }}>Verify & Join</button>
-                    </div>
-                </div>
-                <div style={glassStyle}>
-                    <h4 style={{ margin: '0 0 20px 0' }}>Role Elevation</h4>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                        <input placeholder="Enter User ID" value={targetUserId} onChange={e => setTargetUserId(e.target.value)} style={inputStyle} />
-                        <button onClick={handlePromoteMember} style={{ ...buttonStyle, background: '#fdb827', color: 'white', width: '100%' }}>Promote Head</button>
                     </div>
                 </div>
             </div>

@@ -3,6 +3,7 @@ import { collection, query, where, getDocs, doc, getDoc, setDoc, updateDoc, arra
 import { db } from '../firebaseConfig';
 import { useAuth } from '../AuthContext';
 import ChatRoom from './ChatRoom';
+import { useRole } from '../hooks/useRole';
 
 interface Club {
     id: string;
@@ -31,6 +32,7 @@ interface ClubMember {
     skills?: string;
     team?: string;
     reason?: string;
+    uid?: string; // Added uid field
 }
 
 interface JoinFormData {
@@ -62,6 +64,11 @@ const Clubs = () => {
         team: '',
         reason: ''
     });
+
+    // Admin / Role Logic
+    const currentUserRole = useRole();
+    const isAdmin = currentUserRole === 'chairman' || currentUserRole === 'vice_chairman' || currentUserRole === 'event_head';
+    const [showRoleSelector, setShowRoleSelector] = useState(false);
 
     useEffect(() => {
         const fetchClubs = async () => {
@@ -477,6 +484,46 @@ const Clubs = () => {
         }
     };
 
+
+
+    const handlePromoteUser = async (newRole: string) => {
+        if (!selectedMemberProfile || !selectedMemberProfile.uid) return;
+
+        // Confirmation Step
+        const roleLabel = newRole.replace('_', ' ').toUpperCase();
+        if (!confirm(`⚠️ Are you sure you want to promote ${selectedMemberProfile.name} to ${roleLabel}?`)) {
+            return;
+        }
+
+        // Safety check: ensure we know which club we are in
+        if (!selectedClub) {
+            alert("Error: No club selected context.");
+            return;
+        }
+
+        try {
+            // 1. Update Global User Role (Principal Role)
+            const userRef = doc(db, 'users', selectedMemberProfile.uid);
+            await updateDoc(userRef, {
+                role: newRole,
+                [`roles.${selectedClub.id}`]: newRole // Store club-specific role map
+            });
+
+            // 2. Update Club Member Record
+            const memberRef = doc(db, `clubs/${selectedClub.id}/members`, selectedMemberProfile.uid);
+            await updateDoc(memberRef, { role: newRole });
+
+            alert(`User successfully promoted to ${newRole.toUpperCase().replace('_', ' ')}!`);
+            setShowRoleSelector(false);
+
+            // Refresh local state
+            setSelectedMemberProfile(prev => prev ? { ...prev, role: newRole } : null);
+        } catch (e) {
+            console.error("Promotion failed:", e);
+            alert("Failed to promote user: " + (e as any).message);
+        }
+    };
+
     const submitJoinForm = () => {
         if (!joiningClub) return;
         if (!joinFormData.about || !joinFormData.skills || !joinFormData.team || !joinFormData.reason) {
@@ -872,6 +919,69 @@ const Clubs = () => {
                                 >
                                     Close Profile
                                 </button>
+
+                                {/* ADMIN PROMOTION CONTROLS */}
+                                {isAdmin && (
+                                    <div style={{ marginTop: '20px', borderTop: '1px solid #e2e8f0', paddingTop: '20px' }}>
+                                        {!showRoleSelector ? (
+                                            <button
+                                                onClick={() => setShowRoleSelector(true)}
+                                                style={{
+                                                    width: '100%', padding: '10px', background: 'transparent',
+                                                    color: '#d97706', border: '1px solid #fcd34d', borderRadius: '8px',
+                                                    cursor: 'pointer', fontWeight: 600
+                                                }}
+                                            >
+                                                ⚡ Promote User
+                                            </button>
+                                        ) : (
+                                            <div style={{ display: 'grid', gap: '8px', maxHeight: '300px', overflowY: 'auto' }}>
+                                                <p style={{ margin: '0 0 5px 0', fontSize: '0.85rem', color: '#64748b', textAlign: 'center' }}>Select new role:</p>
+
+                                                {[
+                                                    { id: 'chairman', label: '👑 CHAIRMAN', color: '#FFD700' },
+                                                    { id: 'vice_chairman', label: '💎 VICE CHAIRMAN', color: '#C0C0C0' },
+                                                    { id: 'event_head', label: '🔵 EVENT HEAD', color: '#3b82f6' },
+                                                    { id: 'secretary', label: '🟢 SECRETARY', color: '#22c55e' },
+                                                    { id: 'joint_secretary', label: '🟠 JOINT SECRETARY', color: '#f97316' },
+                                                    { id: 'member', label: '👤 MEMBER', color: '#64748b' }
+                                                ].map(roleItem => (
+                                                    <button
+                                                        key={roleItem.id}
+                                                        type="button"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handlePromoteUser(roleItem.id);
+                                                        }}
+                                                        onMouseOver={(e) => (e.currentTarget.style.opacity = '0.8')}
+                                                        onMouseOut={(e) => (e.currentTarget.style.opacity = '1')}
+                                                        style={{
+                                                            padding: '12px',
+                                                            background: roleItem.id === selectedMemberProfile.role ? roleItem.color : 'white',
+                                                            color: roleItem.id === selectedMemberProfile.role ? 'white' : '#334155',
+                                                            border: `2px solid ${roleItem.color}`,
+                                                            borderRadius: '8px',
+                                                            cursor: 'pointer',
+                                                            fontSize: '0.9rem',
+                                                            fontWeight: '700',
+                                                            textAlign: 'left',
+                                                            transition: 'all 0.2s',
+                                                            zIndex: 20
+                                                        }}
+                                                    >
+                                                        {roleItem.label}
+                                                    </button>
+                                                ))}
+                                                <button
+                                                    onClick={() => setShowRoleSelector(false)}
+                                                    style={{ marginTop: '5px', background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '0.8rem' }}
+                                                >
+                                                    Cancel
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                             </div>
                         </div>
                     )}
