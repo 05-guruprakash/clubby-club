@@ -78,7 +78,7 @@ const AppContent = () => {
   return (
     <GlobalShell setView={setView} currentView={currentView} isDarkMode={isDarkMode} toggleTheme={toggleTheme}>
       {currentView === 'discover' && <Discover />}
-      {currentView === 'clubs' && <Clubs />}
+      {currentView === 'clubs' && <Clubs isDarkMode={isDarkMode} />}
       {currentView === 'feed' && <Feed isDarkMode={isDarkMode} />}
       {currentView === 'notifications' && <Notifications />}
       {currentView === 'profile' && <Profile setView={setView} />}

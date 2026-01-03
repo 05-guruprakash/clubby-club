@@ -1,9 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type FC } from 'react';
 import { collection, query, where, getDocs, doc, getDoc, setDoc, updateDoc, arrayUnion, deleteDoc, increment, arrayRemove, deleteField } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 import { useAuth } from '../AuthContext';
-import ChatRoom from './ChatRoom';
-import { useRole } from '../hooks/useRole';
+// ChatRoom removed - using Go to Community button instead
 
 interface Club {
     id: string;
@@ -27,12 +26,11 @@ interface ClubMember {
     email?: string;
     username?: string;
     regNo?: string;
-    // New fields from Join Form
     about?: string;
     skills?: string;
     team?: string;
     reason?: string;
-    uid?: string; // Added uid field
+    uid?: string;
 }
 
 interface JoinFormData {
@@ -42,7 +40,11 @@ interface JoinFormData {
     reason: string;
 }
 
-const Clubs = () => {
+interface ClubsProps {
+    isDarkMode?: boolean;
+}
+
+const Clubs: FC<ClubsProps> = ({ isDarkMode = true }) => {
     const { user } = useAuth();
     const [joinedClubs, setJoinedClubs] = useState<Club[]>([]);
     const [otherClubs, setOtherClubs] = useState<Club[]>([]);
@@ -65,47 +67,27 @@ const Clubs = () => {
         reason: ''
     });
 
-    // Admin / Role Logic
-    const currentUserRole = useRole();
-    const isAdmin = currentUserRole === 'chairman' || currentUserRole === 'vice_chairman' || currentUserRole === 'event_head';
-    const [showRoleSelector, setShowRoleSelector] = useState(false);
+    const API_BASE = 'http://localhost:3001';
+
+    // Helpers for local persistence
+    const getLocalJoined = () => {
+        if (!user) return [];
+        try {
+            const local = localStorage.getItem(`joined_clubs_${user.uid}`);
+            return local ? JSON.parse(local) : [];
+        } catch (e) { return []; }
+    };
+
+    const saveLocalJoined = (ids: string[]) => {
+        if (!user) return;
+        localStorage.setItem(`joined_clubs_${user.uid}`, JSON.stringify(ids));
+    };
 
     useEffect(() => {
         const fetchClubs = async () => {
             if (!user) return;
             setLoading(true);
             try {
-                // 🔥 Auto-Setup for Super User
-                if (user.email === 'super@nexus.com') {
-                    const clubsRef = collection(db, 'clubs');
-                    const cSnap = await getDocs(query(clubsRef));
-                    const codingClub = cSnap.docs.find(d => d.data().name === 'Coding Club');
-
-                    if (codingClub) {
-                        const clubId = codingClub.id;
-                        const userDocRef = doc(db, 'users', user.uid);
-
-                        try {
-                            const memberRef = doc(db, `clubs/${clubId}/members`, user.uid);
-                            const memberSnap = await getDoc(memberRef);
-                            if (!memberSnap.exists() || (memberSnap.data().role !== 'chairperson' && memberSnap.data().role !== 'chairman')) {
-                                await setDoc(memberRef, {
-                                    userId: user.uid,
-                                    role: 'chairperson',
-                                    status: 'active',
-                                    joined_at: new Date()
-                                }, { merge: true });
-
-                                await setDoc(userDocRef, {
-                                    joined_clubs: arrayUnion(clubId),
-                                    [`roles.${clubId}`]: 'chairperson'
-                                }, { merge: true });
-                                console.log("Super User auto-configured as Chairperson");
-                            }
-                        } catch (e) { console.error("Auto-setup error:", e); }
-                    }
-                }
-
                 const userDocRef = doc(db, 'users', user.uid);
                 const userDocSnap = await getDoc(userDocRef);
                 const joinedClubIds = userDocSnap.exists() ? (userDocSnap.data().joined_clubs || []) : [];
@@ -116,7 +98,6 @@ const Clubs = () => {
                 const querySnapshot = await getDocs(q);
                 const allClubs = querySnapshot.docs.map(d => ({ id: d.id, ...d.data() } as Club));
 
-                // MERGE FIRESTORE AND LOCAL STORAGE JOINED IDS
                 const localJoinedIds = getLocalJoined();
                 const combinedJoinedIds = Array.from(new Set([...joinedClubIds, ...localJoinedIds]));
 
@@ -128,13 +109,11 @@ const Clubs = () => {
                 setLoading(false);
             }
         };
-
         fetchClubs();
     }, [user]);
 
-    // Data Listener for Selected Club
     useEffect(() => {
-        const fetchData = async () => {
+        const fetchSelectedData = async () => {
             if (!selectedClub || !user) {
                 setIsMember(false);
                 setMembers([]);
@@ -143,7 +122,6 @@ const Clubs = () => {
                 return;
             }
 
-            // 1. Determine Membership (Local + Remote)
             const localJoined = getLocalJoined();
             const isLocalMember = localJoined.includes(selectedClub.id);
             let isRemoteMember = false;
@@ -159,260 +137,57 @@ const Clubs = () => {
             } catch (e) { console.warn("Membership check failed (remote)", e); }
 
             const effectiveIsMember = isLocalMember || isRemoteMember;
+            console.log("Checking membership for:", selectedClub.name, "isMember:", effectiveIsMember);
             setIsMember(effectiveIsMember);
             setMyRole(remoteRole || (isLocalMember ? 'member' : null));
 
-            // SELF-HEALING: If local but not remote, restore to Firestore
-            if (isLocalMember && !isRemoteMember) {
-                console.log("Self-healing membership...");
-                setDoc(doc(db, `clubs/${selectedClub.id}/members`, user.uid), {
-                    userId: user.uid, status: 'active', role: 'member',
-                    joined_at: new Date(), name: user.displayName || 'User', email: user.email || ''
-                }, { merge: true }).then(() => {
-                    // Also update user doc to be safe
-                    setDoc(doc(db, 'users', user.uid), {
-                        joined_clubs: arrayUnion(selectedClub.id),
-                        [`roles.${selectedClub.id}`]: 'member'
-                    }, { merge: true });
-                }).catch(e => console.warn("Self-heal failed", e));
-                // We assume it succeeds for UI purposes
-            }
-
-            // 2. Fetch Members (if member)
             if (effectiveIsMember) {
-                let fetchedMembers: ClubMember[] = [];
                 try {
-                    // DUAL FETCH STRATEGY
                     const mq = query(collection(db, `clubs/${selectedClub.id}/members`), where('status', '==', 'active'));
-                    const uq = query(collection(db, 'users'), where('joined_clubs', 'array-contains', selectedClub.id));
-
-                    const [mSnap, uSnap] = await Promise.all([
-                        getDocs(mq).catch(() => ({ docs: [] } as any)),
-                        getDocs(uq).catch(() => ({ docs: [] } as any))
-                    ]);
-
-                    // OLD LOGIC REPLACED BELOW
-                    const membersFromSub = await Promise.all(mSnap.docs.map(async (d: any) => {
-                        // Optimisation: use d.data() fields if user doc fetch fails
-                        let ud = {};
-                        try {
-                            const udSnap = await getDoc(doc(db, 'users', d.data().userId));
-                            ud = udSnap.exists() ? udSnap.data() : {};
-                        } catch (e) { /* ignore user doc fetch err */ }
-
-                        // @ts-ignore
+                    const mSnap = await getDocs(mq);
+                    const list = await Promise.all(mSnap.docs.map(async d => {
+                        const udSnap = await getDoc(doc(db, 'users', d.data().userId));
+                        const ud = udSnap.exists() ? udSnap.data() : {};
                         return {
                             userId: d.data().userId,
                             role: d.data().role,
                             status: d.data().status,
-                            // @ts-ignore
-                            name: ud.firstName ? `${ud.firstName} ${ud.lastName || ''}`.trim() : (d.data().name || 'User'),
-                            // @ts-ignore
+                            name: ud.firstName ? `${ud.firstName} ${ud.lastName || ''}`.trim() : (d.data().name || 'Unknown'),
                             email: ud.officialMail || d.data().email || 'N/A',
-                            // @ts-ignore
-                            username: ud.username || 'N/A',
-                            // @ts-ignore
-                            regNo: ud.regNo || 'N/A'
+                            username: ud.username || 'user',
+                            regNo: ud.regNo || 'N/A',
+                            skills: d.data().skills || 'N/A',
+                            team: d.data().team || 'N/A'
                         } as ClubMember;
                     }));
+                    setMembers(list);
 
-                    // Map User Doc Members (Fallback)
-                    const membersFromUsers = uSnap.docs.map((d: any) => {
-                        const data = d.data();
-                        const userRole = data.roles?.[selectedClub.id] || 'member';
-                        return {
-                            userId: d.id,
-                            role: userRole,
-                            status: 'active',
-                            name: data.firstName ? `${data.firstName} ${data.lastName || ''}`.trim() : (data.username || 'User'),
-                            email: data.officialMail || data.email || 'N/A',
-                            username: data.username || 'N/A',
-                            regNo: data.regNo || 'N/A'
-                        } as ClubMember;
-                    });
-
-                    // Merge and Deduplicate
-                    const combined = [...membersFromSub, ...membersFromUsers];
-                    const uniqueMembers = Array.from(new Map(combined.map(m => [m.userId, m])).values());
-                    fetchedMembers = uniqueMembers;
-                } catch (e) { console.warn("Member list fetch failed (likely permissions)", e); }
-
-                // 3. Ensure Current User is Visible (Fix for "Not visible in list")
-                const isUserInList = fetchedMembers.some(m => m.userId === user.uid);
-                if (!isUserInList) {
-                    // Manually add current user to the list
-                    const currentUserMember: ClubMember = {
-                        userId: user.uid,
-                        role: remoteRole || 'member',
-                        status: 'active',
-                        name: user.displayName || 'You',
-                        email: user.email || '',
-                        username: 'you',
-
-                    };
-                    fetchedMembers.push(currentUserMember);
-                }
-
-                setMembers(fetchedMembers);
-
-                // If Chairperson or Vice Chairman, fetch pending requests
-                if (['chairperson', 'chairman', 'vice_chairman'].includes(remoteRole || '')) {
-                    try {
+                    if (['chairperson', 'chairman', 'vice_chairman'].includes(remoteRole || '')) {
                         const rq = query(collection(db, `clubs/${selectedClub.id}/members`), where('status', '==', 'pending'));
                         const rSnap = await getDocs(rq);
-                        const rList = await Promise.all(rSnap.docs.map(async (d) => {
+                        const rList = await Promise.all(rSnap.docs.map(async d => {
                             const udSnap = await getDoc(doc(db, 'users', d.data().userId));
                             const ud = udSnap.exists() ? udSnap.data() : {};
-                            // @ts-ignore
                             return {
                                 userId: d.data().userId,
                                 role: 'member',
                                 status: 'pending',
-                                // @ts-ignore
-                                name: `${ud.firstName || ''} ${ud.lastName || ''}`.trim() || 'Applicant',
-                                // @ts-ignore
+                                name: ud.firstName ? `${ud.firstName} ${ud.lastName || ''}`.trim() : 'Applicant',
                                 email: ud.officialMail || 'N/A'
                             } as ClubMember;
                         }));
                         setRequests(rList);
-                    } catch (e) { console.warn("Requests fetch failed", e); }
-                }
+                    }
+                } catch (e) { console.warn("Fetch members failed", e); }
             } else {
                 setMembers([]);
             }
         };
-        fetchData();
+        fetchSelectedData();
     }, [selectedClub, user]);
-
-
-    const API_BASE = 'http://localhost:3001';
-
-    const handleApproveMember = async (member: ClubMember) => {
-        if (!selectedClub || !user) return;
-        try {
-            const token = await user.getIdToken();
-            const response = await fetch(`${API_BASE}/clubs/${selectedClub.id}/approve`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify({ targetUserId: member.userId })
-            });
-
-            if (!response.ok) throw new Error("Approval failed on server");
-
-            alert(`Approved ${member.name}`);
-            setRequests(requests.filter(r => r.userId !== member.userId));
-            setMembers([...members, { ...member, status: 'active', role: 'member' }]);
-        } catch (e: any) {
-            console.error("Approval error:", e);
-            alert(e.message);
-        }
-    };
-
-    const handleRejectMember = async (member: ClubMember, isRemoval = false) => {
-        if (!selectedClub || !user) return;
-        if (isRemoval && !confirm(`Are you sure you want to remove ${member.name}?`)) return;
-
-        try {
-            const token = await user.getIdToken();
-            // Reuse reject endpoint for removal as it likely just deletes the member doc
-            const response = await fetch(`${API_BASE}/clubs/${selectedClub.id}/reject`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify({ targetUserId: member.userId })
-            });
-
-            if (!response.ok) throw new Error("Operation failed on server");
-
-            if (isRemoval) {
-                setMembers(members.filter(m => m.userId !== member.userId));
-                alert(`Removed ${member.name}`);
-            } else {
-                setRequests(requests.filter(r => r.userId !== member.userId));
-                alert(`Rejected ${member.name}`);
-            }
-        } catch (e: any) {
-            console.error("Action error:", e);
-            alert(e.message);
-        }
-    };
-
-
-    const handleUpdateRole = async (member: ClubMember, newRole: string) => {
-        if (!selectedClub || !user) return;
-
-        if (newRole === 'chairperson' || newRole === 'chairman') {
-            if (!confirm("WARNING: Transferring Admin rights will immediately revoke your Admin status. You will become a Member. Are you sure?")) {
-                return;
-            }
-        }
-
-        try {
-            const token = await user.getIdToken();
-            const response = await fetch(`${API_BASE}/clubs/${selectedClub.id}/role`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify({ targetUserId: member.userId, newRole })
-            });
-
-            if (!response.ok) throw new Error("Role update failed on server");
-
-            setMembers(members.map(m => m.userId === member.userId ? { ...m, role: newRole } : m));
-            alert(`Updated ${member.name} to ${newRole}`);
-
-            // If self-demotion (transfer admin), reload page or reset state
-            if ((newRole === 'chairperson' || newRole === 'chairman') && member.userId !== user.uid) {
-                window.location.reload(); // Simple way to refresh permissions
-            }
-
-        } catch (e: any) {
-            console.error("Promotion error:", e);
-            alert(e.message);
-        }
-    };
-
-
-    // LOAD LOCAL PERSISTENCE
-    const getLocalJoined = () => {
-        if (!user) return [];
-        try {
-            const local = localStorage.getItem(`joined_clubs_${user.uid}`);
-            return local ? JSON.parse(local) : [];
-        } catch (e) { return []; }
-    };
-
-    const saveLocalJoined = (ids: string[]) => {
-        if (!user) return;
-        localStorage.setItem(`joined_clubs_${user.uid}`, JSON.stringify(ids));
-    };
-
 
     const handleJoinClub = async (club: Club, formData?: JoinFormData) => {
         if (!user) return;
-
-        // PREVENT REDUNDANT JOINS
-        if (joinedClubs.some(c => c.id === club.id) || pendingClubIds.includes(club.id)) {
-            alert("You are already a member or have a pending request.");
-            return;
-        }
-        const localJoined = getLocalJoined();
-        if (localJoined.includes(club.id)) {
-            alert("You have already joined locally. Refreshing state...");
-            setJoinedClubs((prev) => [...prev, { ...club, member_count: (club.member_count || 0) + 1 }]);
-            setOtherClubs((prev) => prev.filter(c => c.id !== club.id));
-            setIsMember(true);
-            return;
-        }
-
-        // SHOW FORM IF NOT PROVIDED
         if (!formData) {
             setJoiningClub(club);
             setShowJoinForm(true);
@@ -420,775 +195,633 @@ const Clubs = () => {
         }
 
         try {
-            // 1. Backend API (Best Effort)
-            try {
-                const token = await user.getIdToken();
-                await fetch(`${API_BASE}/clubs/${club.id}/join`, {
-                    method: 'POST',
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
-            } catch (e) { console.warn("Backend join skipped"); }
+            const token = await user.getIdToken();
+            await fetch(`${API_BASE}/clubs/${club.id}/join`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
+            }).catch(() => { });
 
-            // 2. Client Firestore (Best Effort - might fail due to permissions)
-            try {
-                const status = 'active'; // Force active to bypass broken backend approval
+            const userRef = doc(db, 'users', user.uid);
+            await setDoc(userRef, {
+                joined_clubs: arrayUnion(club.id),
+                [`roles.${club.id}`]: 'member'
+            }, { merge: true });
 
-                const userRef = doc(db, 'users', user.uid);
-                await setDoc(userRef, {
-                    joined_clubs: arrayUnion(club.id),
-                    [`roles.${club.id}`]: 'member'
-                }, { merge: true });
+            const memberRef = doc(db, `clubs/${club.id}/members`, user.uid);
+            await setDoc(memberRef, {
+                userId: user.uid, status: 'active', role: 'member',
+                joined_at: new Date(), name: user.displayName || 'User', email: user.email || '',
+                ...formData
+            }, { merge: true });
 
-                const memberRef = doc(db, `clubs/${club.id}/members`, user.uid);
-                await setDoc(memberRef, {
-                    userId: user.uid, status: status, role: 'member',
-                    joined_at: new Date(), name: user.displayName || 'User', email: user.email || '',
-                    ...formData // Save the form data
-                }, { merge: true });
+            await updateDoc(doc(db, 'clubs', club.id), { member_count: increment(1) }).catch(() => { });
 
-                // C. Increment Member Count (Robust)
-                try {
-                    const clubRef = doc(db, 'clubs', club.id);
-                    // Try atomic increment first
-                    await updateDoc(clubRef, { member_count: increment(1) });
-                } catch (e) {
-                    // Fallback: Read-Modify-Write
-                    try {
-                        const cSnap = await getDoc(doc(db, 'clubs', club.id));
-                        if (cSnap.exists()) {
-                            const currentCount = cSnap.data().member_count || 0;
-                            await updateDoc(doc(db, 'clubs', club.id), { member_count: currentCount + 1 });
-                        }
-                    } catch (e2) { console.warn("Could not update member count via fallback", e2); }
-                }
-
-            } catch (permErr) { console.warn("Firestore write restricted, using local fallback"); }
-
-            // 3. Local Persistence (Guaranteed)
             const currentLocal = getLocalJoined();
-            if (!currentLocal.includes(club.id)) {
-                saveLocalJoined([...currentLocal, club.id]);
-            }
+            saveLocalJoined([...currentLocal, club.id]);
 
-            // 4. UI Update
-            alert(`Joined ${club.name}!`);
+            alert(`Welcome to ${club.name}!`);
             const updatedClub = { ...club, member_count: (club.member_count || 0) + 1 };
-            setJoinedClubs((prev) => [...prev, updatedClub]);
-            setOtherClubs((prev) => prev.filter(c => c.id !== club.id));
+            setJoinedClubs(prev => [...prev, updatedClub]);
+            setOtherClubs(prev => prev.filter(c => c.id !== club.id));
             setIsMember(true);
-            if (selectedClub?.id === club.id) setSelectedClub(updatedClub);
-
-        } catch (e: any) {
-            console.error("Join Error:", e);
-            alert("Joined (Local Mode)"); // Fallback success
+            setSelectedClub(updatedClub);
+        } catch (e) {
+            console.error(e);
+            alert("Join failed. Check connection.");
         }
     };
 
-
-
-    const handlePromoteUser = async (newRole: string) => {
-        if (!selectedMemberProfile || !selectedMemberProfile.uid) return;
-
-        // Confirmation Step
-        const roleLabel = newRole.replace('_', ' ').toUpperCase();
-        if (!confirm(`⚠️ Are you sure you want to promote ${selectedMemberProfile.name} to ${roleLabel}?`)) {
-            return;
-        }
-
-        // Safety check: ensure we know which club we are in
-        if (!selectedClub) {
-            alert("Error: No club selected context.");
-            return;
-        }
-
+    const handleExitClub = async (club: Club) => {
+        if (!user || !confirm(`Leave ${club.name}?`)) return;
         try {
-            // 1. Update Global User Role (Principal Role)
-            const userRef = doc(db, 'users', selectedMemberProfile.uid);
-            await updateDoc(userRef, {
-                role: newRole,
-                [`roles.${selectedClub.id}`]: newRole // Store club-specific role map
+            const token = await user.getIdToken();
+            await fetch(`${API_BASE}/clubs/${club.id}/leave`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
+            }).catch(() => { });
+
+            await updateDoc(doc(db, 'users', user.uid), {
+                joined_clubs: arrayRemove(club.id),
+                [`roles.${club.id}`]: deleteField()
             });
+            await deleteDoc(doc(db, `clubs/${club.id}/members`, user.uid));
+            await updateDoc(doc(db, 'clubs', club.id), { member_count: increment(-1) }).catch(() => { });
 
-            // 2. Update Club Member Record
-            const memberRef = doc(db, `clubs/${selectedClub.id}/members`, selectedMemberProfile.uid);
-            await updateDoc(memberRef, { role: newRole });
+            const currentLocal = getLocalJoined();
+            saveLocalJoined(currentLocal.filter((id: string) => id !== club.id));
 
-            alert(`User successfully promoted to ${newRole.toUpperCase().replace('_', ' ')}!`);
-            setShowRoleSelector(false);
+            setOtherClubs(prev => [...prev, { ...club, member_count: Math.max(0, (club.member_count || 1) - 1) }]);
+            setJoinedClubs(prev => prev.filter(c => c.id !== club.id));
+            setSelectedClub(null);
+        } catch (e) { console.error(e); }
+    };
 
-            // Refresh local state
-            setSelectedMemberProfile(prev => prev ? { ...prev, role: newRole } : null);
-        } catch (e) {
-            console.error("Promotion failed:", e);
-            alert("Failed to promote user: " + (e as any).message);
-        }
+    const handleApproveMember = async (member: ClubMember) => {
+        if (!selectedClub || !user) return;
+        try {
+            const token = await user.getIdToken();
+            await fetch(`${API_BASE}/clubs/${selectedClub.id}/approve`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ targetUserId: member.userId })
+            });
+            setRequests(prev => prev.filter(r => r.userId !== member.userId));
+            setMembers(prev => [...prev, { ...member, status: 'active', role: 'member' }]);
+        } catch (e) { alert("Approval failed"); }
+    };
+
+    const handleUpdateRole = async (member: ClubMember, newRole: string) => {
+        if (!selectedClub || !user) return;
+        try {
+            const token = await user.getIdToken();
+            await fetch(`${API_BASE}/clubs/${selectedClub.id}/role`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ targetUserId: member.userId, newRole })
+            });
+            setMembers(prev => prev.map(m => m.userId === member.userId ? { ...m, role: newRole } : m));
+            alert("Role updated");
+        } catch (e) { alert("Failed to update role"); }
     };
 
     const submitJoinForm = () => {
         if (!joiningClub) return;
         if (!joinFormData.about || !joinFormData.skills || !joinFormData.team || !joinFormData.reason) {
-            alert("Please fill all fields");
+            alert("All fields required");
             return;
         }
         handleJoinClub(joiningClub, joinFormData);
         setShowJoinForm(false);
         setJoinFormData({ about: '', skills: '', team: '', reason: '' });
-        setJoiningClub(null);
     };
 
-    const handleExitClub = async (club: Club) => {
-        if (!user) return;
-        if (!confirm(`Are you sure you want to leave ${club.name}?`)) return;
+    if (loading && !selectedClub) {
+        return (
+            <div style={{ height: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ color: '#bcec15', fontSize: '1.2rem', fontWeight: '900', letterSpacing: '2px', animation: 'pulse 1.5s infinite' }}>SYNCING COMMUNITIES...</div>
+            </div>
+        );
+    }
 
-        try {
-            // 1. Backend API (Best Effort)
-            try {
-                const token = await user.getIdToken();
-                await fetch(`${API_BASE}/clubs/${club.id}/leave`, {
-                    method: 'POST',
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
-            } catch (e) { console.warn("Backend leave skipped"); }
-
-            // 2. FIRESTORE CLEANUP (Nuclear Option to prevent Ghost Members)
-            try {
-                // A. Remove from User's joined list
-                await updateDoc(doc(db, 'users', user.uid), {
-                    joined_clubs: arrayRemove(club.id),
-                    [`roles.${club.id}`]: deleteField()
-                });
-
-                // B. Remove from Club Members List
-                await deleteDoc(doc(db, `clubs/${club.id}/members`, user.uid));
-
-                // C. Decrement Count
-                await updateDoc(doc(db, 'clubs', club.id), {
-                    member_count: increment(-1)
-                });
-            } catch (e) { console.warn("Firestore cleanup partial fail", e); }
-
-            // 3. Local Persistence Cleanup
-            const currentLocal = getLocalJoined();
-            saveLocalJoined(currentLocal.filter((id: string) => id !== club.id));
-
-            // 4. UI Update
-            alert(`Left ${club.name}.`);
-            // Remove from members list if currently viewing
-            if (selectedClub?.id === club.id) {
-                setMembers(prev => prev.filter(m => m.userId !== user.uid));
-                setIsMember(false); // Immediately lock view
-            }
-
-            setOtherClubs((prev) => [...prev, { ...club, member_count: Math.max(0, (club.member_count || 1) - 1) }]);
-            setJoinedClubs((prev) => prev.filter(c => c.id !== club.id));
-            if (selectedClub?.id === club.id) setSelectedClub(null);
-
-        } catch (e) { console.error("Exit Error:", e); }
+    const theme = {
+        bg: isDarkMode ? '#050505' : '#f8f9fa',
+        cardBg: isDarkMode ? 'rgba(255,255,255,0.03)' : '#ffffff',
+        border: isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)',
+        text: isDarkMode ? '#ffffff' : '#111111',
+        subtext: isDarkMode ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)',
+        accent: '#bcec15',
+        accentSuble: isDarkMode ? 'rgba(188, 236, 21, 0.1)' : 'rgba(188, 236, 21, 0.2)',
     };
-
-    // Shared Card Style
-    const cardStyle = {
-        border: '1px solid #e0e0e0',
-        borderRadius: '12px',
-        padding: '20px',
-        backgroundColor: 'white',
-        boxShadow: '0 4px 6px rgba(0,0,0,0.05)',
-        display: 'flex',
-        flexDirection: 'column' as const,
-        justifyContent: 'space-between',
-        transition: 'transform 0.2s ease, box-shadow 0.2s ease'
-    };
-
-    if (loading && !selectedClub) return <div style={{ textAlign: 'center', padding: '50px' }}>Loading Clubs Hub...</div>;
 
     return (
-        <div style={{ fontFamily: '"Inter", sans-serif', color: '#1a1a1a' }}>
-            {selectedClub ? (
-                <div style={{ maxWidth: '1000px', margin: '0 auto', animation: 'fadeIn 0.5s ease' }}>
-                    <button
-                        onClick={() => setSelectedClub(null)}
-                        style={{
-                            background: '#f0f0f0', border: 'none', cursor: 'pointer',
-                            fontSize: '0.9rem', marginBottom: '20px', color: '#333',
-                            padding: '8px 16px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '8px'
-                        }}
-                    >
-                        &larr; Back to Directory
-                    </button>
-
-                    <div style={{
-                        background: 'linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%)',
-                        color: 'white', padding: '40px', borderRadius: '16px', marginBottom: '30px',
-                        boxShadow: '0 10px 25px rgba(59, 130, 246, 0.2)'
-                    }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                            <div>
-                                <h1 style={{ margin: '0 0 10px 0', fontSize: '3rem', fontWeight: 800 }}>{selectedClub.name}</h1>
-                                <p style={{ fontSize: '1.2rem', opacity: 0.9, marginBottom: '20px', fontWeight: 500 }}>
-                                    {selectedClub.moto || 'Innovation awaits...'}
-                                </p>
-                            </div>
-                            {isMember && (
-                                <button
-                                    onClick={() => handleExitClub(selectedClub)}
-                                    style={{
-                                        backgroundColor: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.3)',
-                                        color: 'white', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer',
-                                        fontSize: '0.9rem', fontWeight: 600, transition: 'all 0.2s'
-                                    }}
-                                    onMouseOver={(e) => (e.currentTarget.style.backgroundColor = 'rgba(220, 38, 38, 0.2)')}
-                                    onMouseOut={(e) => (e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.1)')}
-                                >
-                                    Exit Club
-                                </button>
-                            )}
-                        </div>
-
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '20px', marginTop: '10px' }}>
-                            <div style={{ background: 'rgba(255,255,255,0.15)', padding: '10px 20px', borderRadius: '12px', backdropFilter: 'blur(5px)' }}>
-                                <strong style={{ opacity: 0.7, fontSize: '0.8rem', display: 'block' }}>ESTABLISHED</strong>
-                                {selectedClub.since || '2021'}
-                            </div>
-                            <div style={{ background: 'rgba(255,255,255,0.15)', padding: '10px 20px', borderRadius: '12px', backdropFilter: 'blur(5px)' }}>
-                                <strong style={{ opacity: 0.7, fontSize: '0.8rem', display: 'block' }}>EVENTS</strong>
-                                {selectedClub.eventsConducted || 0}
-                            </div>
-                            <div style={{ background: 'rgba(255,255,255,0.15)', padding: '10px 20px', borderRadius: '12px', backdropFilter: 'blur(5px)' }}>
-                                <strong style={{ opacity: 0.7, fontSize: '0.8rem', display: 'block' }}>MEMBERSHIP</strong>
-                                {members.length > 0 ? members.length : (selectedClub.member_count || 0)} active members
-                            </div>
-                        </div>
-                    </div>
-
-                    <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '30px', marginBottom: '40px' }}>
+        <div style={{
+            maxWidth: '1400px',
+            margin: '0 auto',
+            padding: '20px',
+            minHeight: '90vh',
+            color: theme.text,
+            fontFamily: '"Outfit", "Inter", sans-serif'
+        }}>
+            {!selectedClub ? (
+                <div style={{ animation: 'fadeIn 0.6s cubic-bezier(0.23, 1, 0.32, 1)' }}>
+                    {/* Compact Hub Header */}
+                    <div style={{ marginBottom: '50px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
                         <div>
-                            <h3 style={{ fontSize: '1.5rem', marginBottom: '15px' }}>About the Club</h3>
-                            <p style={{ lineHeight: '1.8', fontSize: '1.05rem', color: '#444' }}>
-                                {selectedClub.bio || selectedClub.description || 'No detailed bio available.'}
+                            <h1 style={{
+                                margin: 0,
+                                fontSize: '3.5rem',
+                                fontWeight: '950',
+                                letterSpacing: '-3px',
+                                lineHeight: '1'
+                            }}>
+                                CLUBS<span style={{ color: theme.accent }}>.</span>
+                            </h1>
+                            <p style={{ margin: '12px 0 0 0', opacity: 0.6, fontWeight: '600', fontSize: '1.1rem' }}>
+                                Elite Campus Communities.
                             </p>
-
-                            <h3 style={{ fontSize: '1.5rem', marginTop: '30px', marginBottom: '15px' }}>Notable Achievements</h3>
-                            <ul style={{ paddingLeft: '20px', listStyleType: 'none' }}>
-                                {(selectedClub.achievements || ['Setting new standards since inception', 'Active participation in university fests']).map((ach, i) => (
-                                    <li key={i} style={{ marginBottom: '12px', position: 'relative', paddingLeft: '25px' }}>
-                                        <span style={{ position: 'absolute', left: 0, color: '#3b82f6' }}>★</span>
-                                        {ach}
-                                    </li>
-                                ))}
-                            </ul>
-                        </div>
-
-                        <div style={{ background: '#f8fafc', padding: '24px', borderRadius: '16px', border: '1px solid #e2e8f0' }}>
-                            <h3 style={{ marginTop: 0, fontSize: '1.2rem' }}>Ongoing Activities</h3>
-                            <div style={{ display: 'grid', gap: '15px' }}>
-                                <div style={{ background: 'white', padding: '12px', borderRadius: '8px', borderLeft: '4px solid #10b981' }}>
-                                    <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>Annual Recruitment</div>
-                                    <div style={{ fontSize: '0.8rem', color: '#666' }}>Active until next week</div>
-                                </div>
-                                <div style={{ background: 'white', padding: '12px', borderRadius: '8px', borderLeft: '4px solid #3b82f6' }}>
-                                    <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>Weekly Workshop</div>
-                                    <div style={{ fontSize: '0.8rem', color: '#666' }}>Every Friday at 5 PM</div>
-                                </div>
-                            </div>
-
-                            {/* CLUB COMMUNITY CHAT SECTION */}
-                            <div style={{ marginTop: '30px', background: 'white', padding: '24px', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
-                                <h3 style={{ marginTop: 0, fontSize: '1.2rem', color: '#1e3a8a', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                    <span>💬</span> Club Community Chat
-                                </h3>
-                                <div style={{ height: '500px', overflow: 'hidden', borderRadius: '12px' }}>
-                                    {isMember ? (
-                                        <ChatRoom communityId={selectedClub.id} type="club" />
-                                    ) : (
-                                        <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8fafc', color: '#64748b', textAlign: 'center', padding: '20px' }}>
-                                            Join the club to participate in the conversation!
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
                         </div>
                     </div>
 
-                    <div style={{ marginBottom: '40px' }}>
-                        <h3 style={{ fontSize: '1.5rem', marginBottom: '20px' }}>Club Gallery</h3>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '15px' }}>
-                            {(selectedClub.gallery || [1, 2, 3, 4]).map((img, i) => (
-                                <div key={i} style={{
-                                    height: '180px', background: '#e2e8f0', borderRadius: '12px',
-                                    overflow: 'hidden', boxShadow: '0 2px 5px rgba(0,0,0,0.1)'
-                                }}>
-                                    {typeof img === 'string' ? (
-                                        <img src={img} alt="Gallery" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                                    ) : (
-                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#94a3b8' }}>Moment {i + 1}</div>
-                                    )}
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-
-                    {requests.length > 0 && (
-                        <div style={{ marginBottom: '40px', background: '#fffbeb', padding: '24px', borderRadius: '16px', border: '1px solid #fbbf24', animation: 'slideUp 0.5s ease' }}>
-                            <h3 style={{ marginTop: 0, color: '#92400e', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                🔔 New Join Requests
-                                <span style={{ fontSize: '0.8rem', background: '#fbbf24', color: 'white', padding: '2px 8px', borderRadius: '10px' }}>
-                                    {requests.length}
-                                </span>
-                            </h3>
-                            <div style={{ display: 'grid', gap: '15px' }}>
-                                {requests.map(req => (
-                                    <div key={req.userId} style={{ background: 'white', padding: '16px', borderRadius: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
-                                        <div>
-                                            <div style={{ fontWeight: 600 }}>{req.name}</div>
-                                            <div style={{ fontSize: '0.85rem', color: '#666' }}>{req.email}</div>
-                                        </div>
-                                        <div style={{ display: 'flex', gap: '10px' }}>
-                                            <button
-                                                onClick={() => handleApproveMember(req)}
-                                                style={{ background: '#10b981', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontWeight: 600 }}
-                                            >
-                                                Approve
-                                            </button>
-                                            <button
-                                                onClick={() => handleRejectMember(req)}
-                                                style={{ background: '#ef4444', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontWeight: 600 }}
-                                            >
-                                                Reject
-                                            </button>
-                                        </div>
-                                    </div>
-                                ))}
+                    {/* YOUR SECTORS - Compact Horizontal Scroll or Grid */}
+                    {joinedClubs.length > 0 && (
+                        <section style={{ marginBottom: '60px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '20px', marginBottom: '24px' }}>
+                                <h2 style={{ margin: 0, fontSize: '1.2rem', fontWeight: '900', letterSpacing: '-0.5px' }}>YOUR SECTORS</h2>
+                                <div style={{ height: '1px', flex: 1, background: theme.border }}></div>
+                                <span style={{ fontSize: '0.8rem', fontWeight: '900', opacity: 0.4 }}>{joinedClubs.length} ACTIVE</span>
                             </div>
-                        </div>
-                    )}
-
-                    <div style={{ animation: 'slideUp 0.5s ease' }}>
-                        <h3 style={{ fontSize: '1.5rem', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            Members Directory
-                            {!isMember && (
-                                <span style={{ fontSize: '0.8rem', fontWeight: 500, background: '#fee2e2', color: '#dc2626', padding: '4px 10px', borderRadius: '20px' }}>
-                                    LOCKED
-                                </span>
-                            )}
-                        </h3>
-
-                        {isMember ? (
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '20px' }}>
-                                {members.map(member => (
+                            <div style={{
+                                display: 'grid',
+                                gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+                                gap: '20px'
+                            }}>
+                                {joinedClubs.map(club => (
                                     <div
-                                        key={member.userId}
-                                        onClick={() => setSelectedMemberProfile(member)}
+                                        key={club.id}
+                                        onClick={() => setSelectedClub(club)}
                                         style={{
-                                            ...cardStyle,
+                                            position: 'relative',
+                                            height: '220px',
+                                            borderRadius: '32px',
+                                            overflow: 'hidden',
                                             cursor: 'pointer',
-                                            backgroundColor: (member.role === 'chairman' || member.role === 'chairperson') ? '#fffbeb' : 'white',
-                                            border: (member.role === 'chairman' || member.role === 'chairperson') ? '1px solid #fbbf24' : '1px solid #e2e8f0'
+                                            transition: 'transform 0.4s cubic-bezier(0.23, 1, 0.32, 1), border-color 0.3s',
+                                            border: `1px solid ${theme.border}`,
+                                            boxShadow: isDarkMode ? '0 10px 30px rgba(0,0,0,0.3)' : '0 10px 30px rgba(0,0,0,0.05)'
                                         }}
-                                        onMouseOver={(e) => (e.currentTarget.style.transform = 'translateY(-5px)')}
-                                        onMouseOut={(e) => (e.currentTarget.style.transform = 'translateY(0)')}
+                                        onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.02) translateY(-8px)'; e.currentTarget.style.borderColor = theme.accent; }}
+                                        onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.borderColor = theme.border; }}
                                     >
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                                            <div style={{
-                                                width: '40px', height: '40px', borderRadius: '50%',
-                                                background: (member.role === 'chairman' || member.role === 'chairperson') ? '#fbbf24' : '#e2e8f0',
-                                                display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, color: 'white'
-                                            }}>
-                                                {member.name?.[0].toUpperCase() || '?'}
-                                            </div>
-                                            <div>
-                                                <div style={{ fontWeight: 600, fontSize: '1rem' }}>{member.name}</div>
-                                                <div style={{
-                                                    fontSize: '0.75rem', textTransform: 'uppercase', fontWeight: 700,
-                                                    color: (member.role === 'chairman' || member.role === 'chairperson') ? '#b45309' : '#64748b'
-                                                }}>
-                                                    {member.role}
-                                                </div>
-                                            </div>
+                                        <div style={{
+                                            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                                            background: `linear-gradient(to top, ${isDarkMode ? '#000' : '#222'} 0%, transparent 80%), url(${club.gallery?.[0] || 'https://images.unsplash.com/photo-1540317580384-e5d43616b9aa?q=80&w=2070&auto=format&fit=crop'})`,
+                                            backgroundSize: 'cover', backgroundPosition: 'center',
+                                            opacity: 0.8,
+                                            transition: '0.5s'
+                                        }}></div>
+                                        <div style={{ position: 'relative', zIndex: 2, height: '100%', padding: '24px', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+                                            <div style={{ background: theme.accent, color: '#000', padding: '4px 10px', borderRadius: '50px', fontSize: '0.6rem', fontWeight: '950', width: 'fit-content', marginBottom: '8px' }}>MEMBER</div>
+                                            <h3 style={{ margin: 0, fontSize: '1.6rem', fontWeight: '950', color: '#fff', letterSpacing: '-1.5px', lineHeight: '1' }}>{club.name.toUpperCase()}</h3>
+                                            <p style={{ margin: '4px 0 0 0', fontSize: '0.8rem', color: theme.accent, fontWeight: '700', opacity: 0.8 }}>{club.moto?.toUpperCase()}</p>
                                         </div>
-
-                                        {/* Admin Role Management */}
-                                        {(myRole === 'chairperson' || myRole === 'chairman') && member.userId !== user?.uid && (
-                                            <div style={{ marginTop: '15px', paddingTop: '10px', borderTop: '1px solid #eee' }} onClick={(e) => e.stopPropagation()}>
-                                                <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#94a3b8', marginBottom: '5px', textTransform: 'uppercase' }}>Promote / Change Role</div>
-                                                <select
-                                                    value={member.role}
-                                                    onChange={(e) => handleUpdateRole(member, e.target.value)}
-                                                    style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.85rem', cursor: 'pointer', marginBottom: '8px' }}
-                                                >
-                                                    <option value="member">Member</option>
-                                                    <option value="joint_secretary">Joint Secretary</option>
-                                                    <option value="secretary">Secretary</option>
-                                                    <option value="event_head">Event Head</option>
-                                                    <option value="vice_chairman">Vice Chairman</option>
-                                                    <option value="chairperson">Admin / Chairman</option>
-                                                </select>
-                                                <button
-                                                    onClick={() => handleRejectMember(member, true)}
-                                                    style={{ width: '100%', padding: '6px', background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}
-                                                >
-                                                    Remove Member
-                                                </button>
-                                            </div>
-                                        )}
-
-                                        {/* Vice Chairman can Remove but NOT Promote */}
-                                        {myRole === 'vice_chairman' && member.userId !== user?.uid && member.role !== 'chairperson' && member.role !== 'chairman' && (
-                                            <div style={{ marginTop: '15px', paddingTop: '10px', borderTop: '1px solid #eee' }} onClick={(e) => e.stopPropagation()}>
-                                                <button
-                                                    onClick={() => handleRejectMember(member, true)}
-                                                    style={{ width: '100%', padding: '6px', background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}
-                                                >
-                                                    Remove Member
-                                                </button>
-                                            </div>
-                                        )}
                                     </div>
                                 ))}
-                                {members.length === 0 && <p style={{ color: '#64748b' }}>Populating members list...</p>}
                             </div>
-                        ) : (
-                            <div style={{
-                                background: '#f1f5f9', padding: '40px', borderRadius: '16px', textAlign: 'center',
-                                border: '2px dashed #cbd5e1'
-                            }}>
-                                <p style={{ fontSize: '1.1rem', color: '#475569', marginBottom: '20px' }}>
-                                    The member list is exclusive to {selectedClub.name} members.
-                                </p>
-                                <button
-                                    onClick={() => handleJoinClub(selectedClub)}
-                                    style={{
-                                        background: '#3b82f6', color: 'white', border: 'none', padding: '12px 24px',
-                                        borderRadius: '8px', cursor: 'pointer', fontWeight: 600
-                                    }}
-                                >
-                                    Join Club to View
-                                </button>
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Member Profile Modal */}
-                    {selectedMemberProfile && (
-                        <div style={{
-                            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-                            backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000,
-                            backdropFilter: 'blur(4px)'
-                        }}>
-                            <div style={{
-                                background: 'white', padding: '40px', borderRadius: '20px', width: '90%', maxWidth: '400px',
-                                boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)', animation: 'scaleUp 0.3s ease'
-                            }}>
-                                <div style={{ textAlign: 'center', marginBottom: '30px' }}>
-                                    <div style={{
-                                        width: '80px', height: '80px', borderRadius: '50%', background: '#3b82f6',
-                                        margin: '0 auto 15px', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                        fontSize: '2rem', color: 'white', fontWeight: 800
-                                    }}>
-                                        {selectedMemberProfile.name?.[0].toUpperCase()}
-                                    </div>
-                                    <h2 style={{ margin: 0, fontSize: '1.5rem' }}>{selectedMemberProfile.name}</h2>
-                                    <div style={{ color: '#3b82f6', fontWeight: 600, fontSize: '0.9rem', marginTop: '5px' }}>
-                                        {selectedMemberProfile.role.toUpperCase()}
-                                    </div>
-                                </div>
-
-                                <div style={{ display: 'grid', gap: '16px' }}>
-                                    <div style={{ padding: '12px', background: '#f8fafc', borderRadius: '12px' }}>
-                                        <small style={{ color: '#64748b', fontWeight: 600 }}>USERNAME</small><br />
-                                        <strong>@{selectedMemberProfile.username}</strong>
-                                    </div>
-                                    <div style={{ padding: '12px', background: '#f8fafc', borderRadius: '12px' }}>
-                                        <small style={{ color: '#64748b', fontWeight: 600 }}>REGISTRATION NO</small><br />
-                                        <strong>{selectedMemberProfile.regNo}</strong>
-                                    </div>
-                                    <div style={{ padding: '12px', background: '#f8fafc', borderRadius: '12px' }}>
-                                        <small style={{ color: '#64748b', fontWeight: 600 }}>OFFICIAL EMAIL</small><br />
-                                        <strong>{selectedMemberProfile.email}</strong>
-                                    </div>
-                                </div>
-
-                                <button
-                                    onClick={() => setSelectedMemberProfile(null)}
-                                    style={{
-                                        marginTop: '30px', padding: '14px', width: '100%', background: '#1e293b',
-                                        color: 'white', border: 'none', borderRadius: '12px', cursor: 'pointer',
-                                        fontWeight: 600, transition: 'background 0.2s'
-                                    }}
-                                    onMouseOver={(e) => (e.currentTarget.style.background = '#0f172a')}
-                                    onMouseOut={(e) => (e.currentTarget.style.background = '#1e293b')}
-                                >
-                                    Close Profile
-                                </button>
-
-                                {/* ADMIN PROMOTION CONTROLS */}
-                                {isAdmin && (
-                                    <div style={{ marginTop: '20px', borderTop: '1px solid #e2e8f0', paddingTop: '20px' }}>
-                                        {!showRoleSelector ? (
-                                            <button
-                                                onClick={() => setShowRoleSelector(true)}
-                                                style={{
-                                                    width: '100%', padding: '10px', background: 'transparent',
-                                                    color: '#d97706', border: '1px solid #fcd34d', borderRadius: '8px',
-                                                    cursor: 'pointer', fontWeight: 600
-                                                }}
-                                            >
-                                                ⚡ Promote User
-                                            </button>
-                                        ) : (
-                                            <div style={{ display: 'grid', gap: '8px', maxHeight: '300px', overflowY: 'auto' }}>
-                                                <p style={{ margin: '0 0 5px 0', fontSize: '0.85rem', color: '#64748b', textAlign: 'center' }}>Select new role:</p>
-
-                                                {[
-                                                    { id: 'chairman', label: '👑 CHAIRMAN', color: '#FFD700' },
-                                                    { id: 'vice_chairman', label: '💎 VICE CHAIRMAN', color: '#C0C0C0' },
-                                                    { id: 'event_head', label: '🔵 EVENT HEAD', color: '#3b82f6' },
-                                                    { id: 'secretary', label: '🟢 SECRETARY', color: '#22c55e' },
-                                                    { id: 'joint_secretary', label: '🟠 JOINT SECRETARY', color: '#f97316' },
-                                                    { id: 'member', label: '👤 MEMBER', color: '#64748b' }
-                                                ].map(roleItem => (
-                                                    <button
-                                                        key={roleItem.id}
-                                                        type="button"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            handlePromoteUser(roleItem.id);
-                                                        }}
-                                                        onMouseOver={(e) => (e.currentTarget.style.opacity = '0.8')}
-                                                        onMouseOut={(e) => (e.currentTarget.style.opacity = '1')}
-                                                        style={{
-                                                            padding: '12px',
-                                                            background: roleItem.id === selectedMemberProfile.role ? roleItem.color : 'white',
-                                                            color: roleItem.id === selectedMemberProfile.role ? 'white' : '#334155',
-                                                            border: `2px solid ${roleItem.color}`,
-                                                            borderRadius: '8px',
-                                                            cursor: 'pointer',
-                                                            fontSize: '0.9rem',
-                                                            fontWeight: '700',
-                                                            textAlign: 'left',
-                                                            transition: 'all 0.2s',
-                                                            zIndex: 20
-                                                        }}
-                                                    >
-                                                        {roleItem.label}
-                                                    </button>
-                                                ))}
-                                                <button
-                                                    onClick={() => setShowRoleSelector(false)}
-                                                    style={{ marginTop: '5px', background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '0.8rem' }}
-                                                >
-                                                    Cancel
-                                                </button>
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-                        </div>
+                        </section>
                     )}
-                </div>
-            ) : (
-                <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-                    <div style={{ marginBottom: '50px' }}>
-                        <h2 style={{ fontSize: '2.5rem', fontWeight: 800, marginBottom: '25px', letterSpacing: '-0.5px' }}>My Clubs</h2>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '25px' }}>
-                            {joinedClubs.map(club => (
-                                <div key={club.id} style={cardStyle}>
-                                    <div>
-                                        <h3
-                                            onClick={() => setSelectedClub(club)}
-                                            style={{ margin: '0 0 8px 0', color: '#1a1a1a', cursor: 'pointer', fontSize: '1.4rem' }}
-                                        >
-                                            {club.name || 'Unnamed Club'}
-                                        </h3>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#3b82f6', fontSize: '0.85rem', fontWeight: 700, marginBottom: '12px' }}>
-                                            <span style={{ background: '#dbeafe', padding: '2px 8px', borderRadius: '4px' }}>MEMBER</span>
-                                        </div>
-                                        <p style={{ color: '#64748b', fontSize: '0.95rem', fontStyle: 'italic' }}>
-                                            {club.moto ? `"${club.moto}"` : 'Active Member'}
-                                        </p>
-                                    </div>
-                                    <div style={{ marginTop: '20px', display: 'flex', gap: '10px' }}>
-                                        <button
-                                            onClick={() => setSelectedClub(club)}
-                                            style={{
-                                                flex: 1, padding: '10px', cursor: 'pointer', background: '#1a1a1a',
-                                                color: 'white', border: 'none', borderRadius: '8px', fontWeight: 600
-                                            }}
-                                        >
-                                            Enter Hub
-                                        </button>
-                                        <button
-                                            onClick={() => handleExitClub(club)}
-                                            style={{
-                                                padding: '10px', cursor: 'pointer', background: 'transparent',
-                                                color: '#ef4444', border: '1px solid #fecaca', borderRadius: '8px', fontWeight: 600
-                                            }}
-                                        >
-                                            Leave
-                                        </button>
-                                    </div>
-                                </div>
-                            ))}
-                            {joinedClubs.length === 0 && (
-                                <div style={{ gridColumn: '1/-1', background: '#f8fafc', padding: '40px', borderRadius: '16px', textAlign: 'center', border: '1px solid #e2e8f0' }}>
-                                    <p style={{ color: '#64748b', margin: 0 }}>You haven't joined any clubs yet. Explore the directory below!</p>
-                                </div>
-                            )}
-                        </div>
-                    </div>
 
-                    <div>
-                        <h2 style={{ fontSize: '2.5rem', fontWeight: 800, marginBottom: '25px', letterSpacing: '-0.5px' }}>Explore Clubs</h2>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '25px' }}>
+                    {/* DISCOVER - Sleek Grid */}
+                    <section>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '20px', marginBottom: '24px' }}>
+                            <h2 style={{ margin: 0, fontSize: '1.2rem', fontWeight: '900', letterSpacing: '-0.5px' }}>DISCOVER</h2>
+                            <div style={{ height: '1px', flex: 1, background: theme.border }}></div>
+                            <span style={{ fontSize: '0.8rem', fontWeight: '900', opacity: 0.4 }}>{otherClubs.length} AVAILABLE</span>
+                        </div>
+                        <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+                            gap: '20px'
+                        }}>
                             {otherClubs.map(club => (
                                 <div
                                     key={club.id}
-                                    style={cardStyle}
-                                    onMouseOver={(e) => (e.currentTarget.style.boxShadow = '0 10px 15px -3px rgba(0, 0, 0, 0.1)')}
-                                    onMouseOut={(e) => (e.currentTarget.style.boxShadow = '0 4px 6px -1px rgba(0, 0, 0, 0.05)')}
+                                    onClick={() => setSelectedClub(club)}
+                                    style={{
+                                        background: theme.cardBg,
+                                        borderRadius: '32px',
+                                        padding: '24px',
+                                        border: `1px solid ${theme.border}`,
+                                        cursor: 'pointer',
+                                        transition: '0.3s cubic-bezier(0.23, 1, 0.32, 1)',
+                                        minHeight: '180px',
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        justifyContent: 'space-between',
+                                        boxShadow: isDarkMode ? 'none' : '0 4px 12px rgba(0,0,0,0.03)'
+                                    }}
+                                    onMouseEnter={e => { e.currentTarget.style.background = isDarkMode ? 'rgba(255,255,255,0.05)' : '#f0f0f0'; e.currentTarget.style.transform = 'translateY(-5px)'; e.currentTarget.style.borderColor = theme.accent; }}
+                                    onMouseLeave={e => { e.currentTarget.style.background = theme.cardBg; e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.borderColor = theme.border; }}
                                 >
                                     <div>
-                                        <h3
-                                            onClick={() => setSelectedClub(club)}
-                                            style={{ margin: '0 0 10px 0', cursor: 'pointer', fontSize: '1.4rem' }}
-                                        >
-                                            {club.name || 'Unnamed Club'}
-                                        </h3>
-                                        <p style={{
-                                            color: '#64748b', fontSize: '0.95rem', margin: 0, lineHeight: '1.5',
-                                            display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden'
-                                        }}>
-                                            {club.description || 'No description available for this club.'}
-                                        </p>
-                                        <div style={{ marginTop: '12px', fontSize: '0.85rem', color: '#94a3b8' }}>
-                                            {club.member_count || 0} members • {club.since || '2021'}
-                                        </div>
+                                        <h3 style={{ margin: 0, fontSize: '1.3rem', fontWeight: '900', letterSpacing: '-0.5px' }}>{club.name}</h3>
+                                        <p style={{ margin: '8px 0 0 0', opacity: 0.5, fontSize: '0.85rem', lineHeight: '1.5', fontWeight: '500' }}>{club.moto || club.description}</p>
                                     </div>
-                                    <div style={{ marginTop: '20px', display: 'flex', gap: '12px' }}>
-                                        <button
-                                            disabled={pendingClubIds.includes(club.id)}
-                                            onClick={() => handleJoinClub(club)}
-                                            style={{
-                                                flex: 2, padding: '12px',
-                                                backgroundColor: pendingClubIds.includes(club.id) ? '#94a3b8' : (club.requiresApproval ? '#1e293b' : '#3b82f6'),
-                                                color: 'white', border: 'none', borderRadius: '8px', cursor: pendingClubIds.includes(club.id) ? 'not-allowed' : 'pointer', fontWeight: 600
-                                            }}
-                                        >
-                                            {pendingClubIds.includes(club.id) ? 'Request Pending' : (club.requiresApproval ? 'Request to Join' : 'Join Now')}
-                                        </button>
-                                        <button
-                                            onClick={() => setSelectedClub(club)}
-                                            style={{
-                                                flex: 1, padding: '12px', backgroundColor: 'transparent',
-                                                color: '#1e293b', border: '1px solid #e2e8f0', borderRadius: '8px', cursor: 'pointer', fontWeight: 600
-                                            }}
-                                        >
-                                            View
-                                        </button>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px' }}>
+                                        <div style={{ fontSize: '0.65rem', fontWeight: '900', opacity: 0.4 }}>{club.member_count || 0} RECRUITS</div>
+                                        <div style={{ color: theme.accent, fontSize: '0.8rem', fontWeight: '950' }}>JOIN &rarr;</div>
                                     </div>
                                 </div>
                             ))}
-                            {otherClubs.length === 0 && <p style={{ color: '#64748b' }}>No other clubs found at this time.</p>}
+                        </div>
+                    </section>
+                </div>
+            ) : (
+                <div style={{ animation: 'fadeIn 0.6s cubic-bezier(0.23, 1, 0.32, 1)' }}>
+                    {/* SLEEK CLUB DETAIL HEADER */}
+                    <div style={{
+                        position: 'relative',
+                        height: '280px',
+                        borderRadius: '32px',
+                        overflow: 'hidden',
+                        marginBottom: '32px',
+                        boxShadow: '0 20px 40px -12px rgba(0, 0, 0, 0.4)',
+                        border: `1px solid ${theme.border}`
+                    }}>
+                        <div style={{
+                            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                            background: `linear-gradient(to bottom, rgba(0,0,0,0.3), #000 100%), url(${selectedClub.gallery?.[0] || 'https://images.unsplash.com/photo-1522071820081-009f0129c71c?q=80&w=2070&auto=format&fit=crop'})`,
+                            backgroundSize: 'cover', backgroundPosition: 'center',
+                            backgroundAttachment: 'fixed',
+                            zIndex: 1,
+                            opacity: 0.9
+                        }}></div>
+
+                        <div style={{
+                            position: 'relative', zIndex: 2, height: '100%',
+                            padding: '32px 40px',
+                            display: 'flex', flexDirection: 'column', justifyContent: 'space-between'
+                        }}>
+                            {/* Top Row: Back Button */}
+                            <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+                                <button
+                                    onClick={() => setSelectedClub(null)}
+                                    style={{
+                                        background: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(20px)', color: '#fff',
+                                        border: '1px solid rgba(255,255,255,0.15)', padding: '10px 20px',
+                                        borderRadius: '14px', fontWeight: '800', cursor: 'pointer', transition: '0.3s', fontSize: '0.8rem'
+                                    }}
+                                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.2)'}
+                                    onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                                >&larr; BACK TO HUB</button>
+                            </div>
+
+                            {/* Bottom Row: Club Info & Actions */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: '20px' }}>
+                                <div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+                                        <div style={{ background: theme.accent, color: '#000', padding: '4px 12px', borderRadius: '50px', fontSize: '0.6rem', fontWeight: '950', letterSpacing: '1px' }}>OFFICIAL</div>
+                                        {isMember && <div style={{ background: 'rgba(255,255,255,0.15)', color: '#fff', padding: '4px 12px', borderRadius: '50px', fontSize: '0.6rem', fontWeight: '950', backdropFilter: 'blur(10px)', border: '1px solid rgba(255,255,255,0.1)' }}>MEMBER</div>}
+                                    </div>
+                                    <h1 style={{
+                                        margin: 0,
+                                        fontSize: '2.8rem',
+                                        fontWeight: '950',
+                                        color: '#fff',
+                                        letterSpacing: '-2px',
+                                        lineHeight: '1',
+                                        textShadow: '0 4px 12px rgba(0,0,0,0.3)'
+                                    }}>{selectedClub.name.toUpperCase()}</h1>
+                                    <p style={{ margin: '10px 0 0 0', fontSize: '1rem', color: theme.accent, fontWeight: '700', letterSpacing: '0.5px', opacity: 0.9 }}>{selectedClub.moto?.toUpperCase()}</p>
+                                </div>
+                                <div style={{ display: 'flex', gap: '10px' }}>
+                                    {isMember ? (
+                                        <>
+                                            <button
+                                                onClick={() => handleExitClub(selectedClub)}
+                                                style={{
+                                                    background: 'rgba(255,100,100,0.15)', backdropFilter: 'blur(20px)', color: '#ff6464',
+                                                    border: '1px solid rgba(255,100,100,0.2)', padding: '10px 20px',
+                                                    borderRadius: '14px', fontWeight: '800', cursor: 'pointer', transition: '0.3s', fontSize: '0.8rem'
+                                                }}
+                                                onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,100,100,0.25)'}
+                                                onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,100,100,0.15)'}
+                                            >LEAVE</button>
+                                        </>
+                                    ) : (
+                                        <button
+                                            onClick={() => handleJoinClub(selectedClub)}
+                                            style={{
+                                                background: theme.accent, color: '#000', padding: '10px 28px',
+                                                borderRadius: '14px', fontWeight: '950', border: 'none',
+                                                cursor: 'pointer', transition: '0.3s', fontSize: '0.8rem',
+                                                boxShadow: `0 8px 20px ${theme.accent}44`
+                                            }}
+                                            onMouseEnter={e => e.currentTarget.style.transform = 'translateY(-2px)'}
+                                            onMouseLeave={e => e.currentTarget.style.transform = 'translateY(0)'}
+                                        >JOIN NOW</button>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* CONTENT - Single Column Layout */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+
+                        {/* Statistics Row */}
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
+                            {[
+                                { label: 'SINCE', val: selectedClub.since || '2021' },
+                                { label: 'EVENTS', val: selectedClub.eventsConducted || '0' },
+                                { label: 'MEMBERS', val: members.length || selectedClub.member_count || '0' }
+                            ].map((s, i) => (
+                                <div key={i} style={{
+                                    background: theme.cardBg, padding: '24px', borderRadius: '28px',
+                                    border: `1px solid ${theme.border}`, textAlign: 'center',
+                                    transition: '0.3s'
+                                }}>
+                                    <div style={{ fontSize: '0.6rem', fontWeight: '950', letterSpacing: '1.5px', color: theme.subtext, marginBottom: '6px' }}>{s.label}</div>
+                                    <div style={{ fontSize: '1.8rem', fontWeight: '950', color: theme.text, letterSpacing: '-1px' }}>{s.val}</div>
+                                </div>
+                            ))}
+                        </div>
+
+                        {/* Mission Section */}
+                        <div style={{
+                            background: theme.cardBg, padding: '32px', borderRadius: '32px', border: `1px solid ${theme.border}`
+                        }}>
+                            <h2 style={{ margin: '0 0 16px 0', fontSize: '1.1rem', fontWeight: '950', letterSpacing: '0.5px' }}>THE MISSION</h2>
+                            <p style={{ margin: 0, fontSize: '0.95rem', lineHeight: '1.7', opacity: 0.7, fontWeight: '500' }}>
+                                {selectedClub.bio || selectedClub.description || 'Our mission is to foster innovation and leadership in the campus community through collaborative projects and elite networking.'}
+                            </p>
+                        </div>
+
+                        {/* Chronicles Section */}
+                        <div>
+                            <h2 style={{ margin: '0 0 16px 0', fontSize: '1.1rem', fontWeight: '950', letterSpacing: '0.5px' }}>CHRONICLES</h2>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
+                                {(selectedClub.gallery?.slice(0, 4) || [1, 2, 3, 4]).map((img, i) => (
+                                    <div key={i} style={{
+                                        borderRadius: '24px', background: isDarkMode ? 'rgba(255,255,255,0.04)' : '#eee',
+                                        overflow: 'hidden', border: `1px solid ${theme.border}`,
+                                        height: '120px'
+                                    }}>
+                                        {typeof img === 'string' ? <img src={img} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.2, fontSize: '0.65rem', fontWeight: '900' }}>SNAPSHOT {i + 1}</div>}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Go to Club Community Button */}
+                        {isMember && (
+                            <div style={{
+                                background: theme.accentSuble,
+                                borderRadius: '28px',
+                                padding: '24px 32px',
+                                border: `1px solid ${theme.accent}33`,
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center'
+                            }}>
+                                <div>
+                                    <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: '950', color: theme.accent }}>CLUB COMMUNITY</h3>
+                                    <p style={{ margin: '4px 0 0 0', fontSize: '0.8rem', opacity: 0.6, fontWeight: '600' }}>Access the club's discussion forum and chat with members.</p>
+                                </div>
+                                <button
+                                    onClick={() => {
+                                        // Navigate to Feed with club community context
+                                        alert(`Redirecting to ${selectedClub.name} Community Feed...`);
+                                        // This would link to a dedicated community page if available
+                                    }}
+                                    style={{
+                                        background: theme.accent, color: '#000', padding: '12px 28px',
+                                        borderRadius: '16px', fontWeight: '950', border: 'none',
+                                        cursor: 'pointer', transition: '0.3s', fontSize: '0.85rem',
+                                        whiteSpace: 'nowrap'
+                                    }}
+                                    onMouseEnter={e => e.currentTarget.style.transform = 'translateY(-2px)'}
+                                    onMouseLeave={e => e.currentTarget.style.transform = 'translateY(0)'}
+                                >GO TO COMMUNITY &rarr;</button>
+                            </div>
+                        )}
+
+                        {/* MEMBERS LIST */}
+                        <div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                                <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '950', letterSpacing: '0.5px' }}>MEMBERS</h2>
+                                <div style={{ padding: '4px 12px', background: theme.accentSuble, color: theme.accent, borderRadius: '50px', fontSize: '0.6rem', fontWeight: '900' }}>{members.length} ACTIVE</div>
+                            </div>
+
+                            {isMember ? (
+                                members.length > 0 ? (
+                                    <div style={{
+                                        display: 'grid',
+                                        gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
+                                        gap: '16px'
+                                    }}>
+                                        {members.map(m => (
+                                            <div
+                                                key={m.userId}
+                                                onClick={() => setSelectedMemberProfile(m)}
+                                                style={{
+                                                    background: theme.cardBg, padding: '20px', borderRadius: '24px',
+                                                    border: `1px solid ${theme.border}`, cursor: 'pointer', textAlign: 'center', transition: '0.3s'
+                                                }}
+                                                onMouseEnter={e => { e.currentTarget.style.borderColor = theme.accent; e.currentTarget.style.transform = 'translateY(-4px)'; }}
+                                                onMouseLeave={e => { e.currentTarget.style.borderColor = theme.border; e.currentTarget.style.transform = 'translateY(0)'; }}
+                                            >
+                                                <div style={{
+                                                    width: '52px', height: '52px', borderRadius: '16px',
+                                                    background: m.role?.toLowerCase().includes('chairman') ? theme.accent : (isDarkMode ? 'rgba(255,255,255,0.05)' : '#f0f0f0'),
+                                                    color: m.role?.toLowerCase().includes('chairman') ? '#000' : theme.text,
+                                                    fontSize: '1.2rem', fontWeight: '950', display: 'flex',
+                                                    alignItems: 'center', justifyContent: 'center', margin: '0 auto 10px'
+                                                }}>
+                                                    {m.name?.[0]?.toUpperCase() || 'U'}
+                                                </div>
+                                                <div style={{ fontWeight: '800', fontSize: '0.85rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.name}</div>
+                                                <div style={{ fontSize: '0.55rem', fontWeight: '950', color: theme.accent, opacity: 0.7, marginTop: '4px', letterSpacing: '1px' }}>{m.role?.toUpperCase() || 'MEMBER'}</div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div style={{ padding: '40px', textAlign: 'center', background: theme.cardBg, borderRadius: '28px', border: `1px solid ${theme.border}` }}>
+                                        <p style={{ opacity: 0.4, fontWeight: '700' }}>Loading members...</p>
+                                    </div>
+                                )
+                            ) : (
+                                <div style={{
+                                    background: theme.cardBg, padding: '50px 40px', borderRadius: '32px',
+                                    border: `1px dashed ${theme.border}`, textAlign: 'center'
+                                }}>
+                                    <div style={{ fontSize: '2rem', marginBottom: '12px' }}>🔒</div>
+                                    <h3 style={{ margin: '0 0 8px 0', fontSize: '1.1rem', fontWeight: '900' }}>MEMBERS ONLY</h3>
+                                    <p style={{ margin: 0, fontWeight: '600', opacity: 0.4, fontSize: '0.85rem' }}>Join the club to view member directory.</p>
+                                    <button
+                                        onClick={() => handleJoinClub(selectedClub)}
+                                        style={{
+                                            marginTop: '20px', background: theme.accent, color: '#000',
+                                            border: 'none', padding: '12px 24px', borderRadius: '14px',
+                                            fontWeight: '900', cursor: 'pointer'
+                                        }}
+                                    >JOIN NOW</button>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Pending Recruitments (Admin Only) */}
+                        {requests.length > 0 && (
+                            <div style={{
+                                background: theme.accentSuble, padding: '24px', borderRadius: '28px',
+                                border: `1px solid ${theme.accent}33`
+                            }}>
+                                <h3 style={{ margin: '0 0 16px 0', fontSize: '0.8rem', fontWeight: '950', color: theme.accent, letterSpacing: '1.5px' }}>PENDING REQUESTS ({requests.length})</h3>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '12px' }}>
+                                    {requests.map(req => (
+                                        <div key={req.userId} style={{
+                                            background: isDarkMode ? 'rgba(255,255,255,0.04)' : '#fff', padding: '14px 18px',
+                                            borderRadius: '16px', display: 'flex', justifyContent: 'space-between',
+                                            alignItems: 'center', border: `1px solid ${theme.border}`
+                                        }}>
+                                            <span style={{ fontWeight: '800', fontSize: '0.8rem', opacity: 0.8 }}>{req.name?.toUpperCase() || 'APPLICANT'}</span>
+                                            <button
+                                                onClick={() => handleApproveMember(req)}
+                                                style={{ background: theme.accent, color: '#000', border: 'none', padding: '6px 14px', borderRadius: '10px', fontSize: '0.65rem', fontWeight: '950', cursor: 'pointer' }}
+                                            >ACCEPT</button>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* Application Modal - Modern Sleek */}
+            {showJoinForm && joiningClub && (
+                <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(15px)', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                    <div style={{
+                        background: isDarkMode ? '#0a0a0a' : '#fff', width: '90%', maxWidth: '500px',
+                        borderRadius: '45px', padding: '40px', border: `1px solid ${theme.accent}33`,
+                        boxShadow: `0 0 60px ${theme.accent}11`, animation: 'zoomIn 0.3s cubic-bezier(0.23, 1, 0.32, 1)'
+                    }}>
+                        <h2 style={{ margin: 0, fontSize: '2.2rem', fontWeight: '950', letterSpacing: '-1.5px' }}>RECRUITMENT</h2>
+                        <p style={{ margin: '8px 0 32px 0', opacity: 0.5, fontWeight: '800', fontSize: '0.8rem' }}>APPLYING TO {joiningClub.name.toUpperCase()}</p>
+
+                        <div style={{ display: 'grid', gap: '20px' }}>
+                            {[
+                                { k: 'about', l: 'INTEL', p: 'Briefly describe your vision...' },
+                                { k: 'skills', l: 'SKILLSET', p: 'React, Design, Python...' },
+                                { k: 'team', l: 'DEPARTMENT', p: 'Technical, Outreach, Events...' },
+                                { k: 'reason', l: 'OBJECTIVE', p: 'Why join this community?' }
+                            ].map(x => (
+                                <div key={x.k}>
+                                    <label style={{ display: 'block', fontSize: '0.6rem', fontWeight: '950', color: theme.accent, marginBottom: '8px', letterSpacing: '2px' }}>{x.l}</label>
+                                    <textarea
+                                        placeholder={x.p}
+                                        value={(joinFormData as any)[x.k]}
+                                        onChange={e => setJoinFormData(prev => ({ ...prev, [x.k]: e.target.value }))}
+                                        style={{
+                                            width: '100%', background: isDarkMode ? 'rgba(255,255,255,0.03)' : '#f5f5f5',
+                                            border: `1px solid ${theme.border}`, padding: '14px 20px',
+                                            borderRadius: '18px', color: theme.text, fontSize: '0.9rem',
+                                            outline: 'none', minHeight: '60px', resize: 'none'
+                                        }}
+                                    />
+                                </div>
+                            ))}
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '16px', marginTop: '32px' }}>
+                            <button onClick={() => setShowJoinForm(false)} style={{ flex: 1, padding: '16px', borderRadius: '20px', background: 'transparent', color: theme.text, border: `1px solid ${theme.border}`, fontWeight: '950', cursor: 'pointer', fontSize: '0.85rem' }}>CANCEL</button>
+                            <button onClick={submitJoinForm} style={{ flex: 2, padding: '16px', borderRadius: '20px', background: theme.accent, color: '#000', fontWeight: '950', border: 'none', cursor: 'pointer', fontSize: '0.85rem' }}>SUBMIT APPLICATION</button>
                         </div>
                     </div>
                 </div>
             )}
 
-            {/* JOIN CLUB FORM DIALOG */}
-            {showJoinForm && joiningClub && (
-                <div style={{
-                    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-                    backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 2000,
-                    backdropFilter: 'blur(5px)'
-                }}>
+            {/* Profile Modal - Detailed */}
+            {selectedMemberProfile && (
+                <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(15px)', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
                     <div style={{
-                        background: 'white', padding: '30px', borderRadius: '16px', width: '90%', maxWidth: '500px',
-                        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)', animation: 'scaleUp 0.3s ease',
-                        maxHeight: '90vh', overflowY: 'auto'
+                        background: isDarkMode ? '#0a0a0a' : '#fff', width: '90%', maxWidth: '440px',
+                        borderRadius: '45px', padding: '40px', border: `1px solid ${theme.border}`,
+                        animation: 'zoomIn 0.3s cubic-bezier(0.23, 1, 0.32, 1)'
                     }}>
-                        <h2 style={{ marginTop: 0, marginBottom: '20px', fontSize: '1.5rem', borderBottom: '1px solid #eee', paddingBottom: '10px' }}>
-                            Join {joiningClub.name}
-                        </h2>
-
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-                            <div>
-                                <label style={{ display: 'block', marginBottom: '5px', fontWeight: 600, fontSize: '0.9rem' }}>Tell us about yourself</label>
-                                <textarea
-                                    value={joinFormData.about}
-                                    onChange={(e) => setJoinFormData({ ...joinFormData, about: e.target.value })}
-                                    placeholder="Brief bio..."
-                                    style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ccc', minHeight: '60px' }}
-                                />
+                        <div style={{ textAlign: 'center', marginBottom: '32px' }}>
+                            <div style={{
+                                width: '90px', height: '90px', borderRadius: '32px',
+                                background: theme.accent, margin: '0 auto 16px',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                fontSize: '2.5rem', fontWeight: '950', color: '#000'
+                            }}>
+                                {selectedMemberProfile.name?.[0]?.toUpperCase() || 'U'}
                             </div>
+                            <h2 style={{ margin: 0, fontSize: '1.8rem', fontWeight: '950', letterSpacing: '-1.5px' }}>{selectedMemberProfile.name?.toUpperCase() || 'USER'}</h2>
 
-                            <div>
-                                <label style={{ display: 'block', marginBottom: '5px', fontWeight: 600, fontSize: '0.9rem' }}>Your Skills</label>
-                                <input
-                                    type="text"
-                                    value={joinFormData.skills}
-                                    onChange={(e) => setJoinFormData({ ...joinFormData, skills: e.target.value })}
-                                    placeholder="e.g. React, Design, Marketing"
-                                    style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ccc' }}
-                                />
-                            </div>
+                            <div style={{ color: theme.accent, fontWeight: '950', fontSize: '0.75rem', letterSpacing: '2px', marginTop: '6px' }}>{selectedMemberProfile.role?.toUpperCase() || 'AGENT'}</div>
+                        </div>
 
-                            <div>
-                                <label style={{ display: 'block', marginBottom: '5px', fontWeight: 600, fontSize: '0.9rem' }}>Preferred Team</label>
+                        <div style={{ display: 'grid', gap: '12px' }}>
+                            {[
+                                { l: 'IDENTIFIER', v: selectedMemberProfile.regNo || 'N/A' },
+                                { l: 'DEPT', v: selectedMemberProfile.team || 'GENERAL' },
+                                { l: 'EXPERTISE', v: selectedMemberProfile.skills || 'UNDISCLOSED' },
+                                { l: 'CONTACT', v: selectedMemberProfile.email || 'PROTECTED' }
+                            ].map((i, idx) => (
+                                <div key={idx} style={{
+                                    background: isDarkMode ? 'rgba(255,255,255,0.02)' : '#f9f9f9',
+                                    padding: '16px 20px', borderRadius: '20px',
+                                    border: `1px solid ${theme.border}`
+                                }}>
+                                    <div style={{ opacity: 0.4, fontSize: '0.55rem', fontWeight: '950', letterSpacing: '1px', marginBottom: '4px' }}>{i.l}</div>
+                                    <div style={{ fontWeight: '800', fontSize: '0.95rem' }}>{i.v.toUpperCase()}</div>
+                                </div>
+                            ))}
+                        </div>
+
+                        {/* Admin Action Bar */}
+                        {['chairperson', 'chairman', 'vice_chairman'].includes(myRole || '') && selectedMemberProfile.userId !== user?.uid && (
+                            <div style={{ display: 'flex', gap: '12px', marginTop: '24px' }}>
                                 <select
-                                    value={joinFormData.team}
-                                    onChange={(e) => setJoinFormData({ ...joinFormData, team: e.target.value })}
-                                    style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ccc' }}
+                                    onChange={(e) => handleUpdateRole(selectedMemberProfile, e.target.value)}
+                                    style={{
+                                        flex: 1, padding: '12px', background: isDarkMode ? 'rgba(255,255,255,0.05)' : '#eee',
+                                        color: theme.text, border: `1px solid ${theme.border}`,
+                                        borderRadius: '14px', fontWeight: '800', outline: 'none', fontSize: '0.75rem'
+                                    }}
+                                    value={selectedMemberProfile.role}
                                 >
-                                    <option value="">Select a Team</option>
-                                    <option value="Technical">Technical</option>
-                                    <option value="Design">Design</option>
-                                    <option value="Marketing">Marketing / Affairs</option>
-                                    <option value="Management">Management</option>
-                                    <option value="Content">Content</option>
-                                    <option value="Logistics">Logistics</option>
-                                    <option value="Other">Other</option>
+                                    <option value="member">MEMBER</option>
+                                    <option value="event_head">EVENT HEAD</option>
+                                    <option value="vice_chairman">VICE CHAIR</option>
                                 </select>
+                                <button
+                                    onClick={() => selectedMemberProfile && alert("Member expulsion deactivated for maintenance.")}
+                                    style={{
+                                        padding: '12px 20px', borderRadius: '14px',
+                                        background: 'rgba(255,68,68,0.1)', color: '#ff4444',
+                                        border: '1px solid rgba(255,68,68,0.1)', fontWeight: '900',
+                                        cursor: 'pointer', fontSize: '0.75rem'
+                                    }}
+                                >EXPEL</button>
                             </div>
+                        )}
 
-                            <div>
-                                <label style={{ display: 'block', marginBottom: '5px', fontWeight: 600, fontSize: '0.9rem' }}>Reason for Joining</label>
-                                <textarea
-                                    value={joinFormData.reason}
-                                    onChange={(e) => setJoinFormData({ ...joinFormData, reason: e.target.value })}
-                                    placeholder="Why do you want to join?"
-                                    style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ccc', minHeight: '60px' }}
-                                />
-                            </div>
-                        </div>
-
-                        <div style={{ marginTop: '25px', display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-                            <button
-                                onClick={() => { setShowJoinForm(false); setJoiningClub(null); }}
-                                style={{
-                                    padding: '10px 20px', background: 'transparent', color: '#666', border: 'none',
-                                    borderRadius: '8px', cursor: 'pointer', fontWeight: 600
-                                }}
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                onClick={submitJoinForm}
-                                style={{
-                                    padding: '10px 20px', background: '#3b82f6', color: 'white', border: 'none',
-                                    borderRadius: '8px', cursor: 'pointer', fontWeight: 600
-                                }}
-                            >
-                                Submit Application
-                            </button>
-                        </div>
+                        <button onClick={() => setSelectedMemberProfile(null)} style={{ width: '100%', marginTop: '24px', padding: '18px', borderRadius: '22px', background: theme.text, color: theme.bg, fontWeight: '950', border: 'none', cursor: 'pointer', fontSize: '0.9rem' }}>CLOSE PROFILE</button>
                     </div>
                 </div>
             )}
 
             <style>{`
-                @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-                @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-                @keyframes scaleUp { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+                @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@100;300;400;500;600;700;800;900&display=swap');
+                @keyframes fadeIn { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
+                @keyframes zoomIn { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: scale(1); } }
+                @keyframes pulse { 0% { opacity: 0.6; } 50% { opacity: 1; } 100% { opacity: 0.6; } }
+                ::-webkit-scrollbar { width: 5px; }
+                ::-webkit-scrollbar-track { background: transparent; }
+                ::-webkit-scrollbar-thumb { background: rgba(188, 236, 21, 0.15); border-radius: 10px; }
+                ::-webkit-scrollbar-thumb:hover { background: #bcec15; }
             `}</style>
         </div>
     );
