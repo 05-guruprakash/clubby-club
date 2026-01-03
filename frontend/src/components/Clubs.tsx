@@ -26,6 +26,18 @@ interface ClubMember {
     email?: string;
     username?: string;
     regNo?: string;
+    // New fields from Join Form
+    about?: string;
+    skills?: string;
+    team?: string;
+    reason?: string;
+}
+
+interface JoinFormData {
+    about: string;
+    skills: string;
+    team: string;
+    reason: string;
 }
 
 const Clubs = () => {
@@ -40,6 +52,16 @@ const Clubs = () => {
     const [requests, setRequests] = useState<ClubMember[]>([]);
     const [pendingClubIds, setPendingClubIds] = useState<string[]>([]);
     const [myRole, setMyRole] = useState<string | null>(null);
+
+    // Join Form State
+    const [showJoinForm, setShowJoinForm] = useState(false);
+    const [joiningClub, setJoiningClub] = useState<Club | null>(null);
+    const [joinFormData, setJoinFormData] = useState<JoinFormData>({
+        about: '',
+        skills: '',
+        team: '',
+        reason: ''
+    });
 
     useEffect(() => {
         const fetchClubs = async () => {
@@ -365,7 +387,8 @@ const Clubs = () => {
         localStorage.setItem(`joined_clubs_${user.uid}`, JSON.stringify(ids));
     };
 
-    const handleJoinClub = async (club: Club) => {
+
+    const handleJoinClub = async (club: Club, formData?: JoinFormData) => {
         if (!user) return;
 
         // PREVENT REDUNDANT JOINS
@@ -379,6 +402,13 @@ const Clubs = () => {
             setJoinedClubs((prev) => [...prev, { ...club, member_count: (club.member_count || 0) + 1 }]);
             setOtherClubs((prev) => prev.filter(c => c.id !== club.id));
             setIsMember(true);
+            return;
+        }
+
+        // SHOW FORM IF NOT PROVIDED
+        if (!formData) {
+            setJoiningClub(club);
+            setShowJoinForm(true);
             return;
         }
 
@@ -405,7 +435,8 @@ const Clubs = () => {
                 const memberRef = doc(db, `clubs/${club.id}/members`, user.uid);
                 await setDoc(memberRef, {
                     userId: user.uid, status: status, role: 'member',
-                    joined_at: new Date(), name: user.displayName || 'User', email: user.email || ''
+                    joined_at: new Date(), name: user.displayName || 'User', email: user.email || '',
+                    ...formData // Save the form data
                 }, { merge: true });
 
                 // C. Increment Member Count (Robust)
@@ -444,6 +475,18 @@ const Clubs = () => {
             console.error("Join Error:", e);
             alert("Joined (Local Mode)"); // Fallback success
         }
+    };
+
+    const submitJoinForm = () => {
+        if (!joiningClub) return;
+        if (!joinFormData.about || !joinFormData.skills || !joinFormData.team || !joinFormData.reason) {
+            alert("Please fill all fields");
+            return;
+        }
+        handleJoinClub(joiningClub, joinFormData);
+        setShowJoinForm(false);
+        setJoinFormData({ about: '', skills: '', team: '', reason: '' });
+        setJoiningClub(null);
     };
 
     const handleExitClub = async (club: Club) => {
@@ -936,6 +979,97 @@ const Clubs = () => {
                                 </div>
                             ))}
                             {otherClubs.length === 0 && <p style={{ color: '#64748b' }}>No other clubs found at this time.</p>}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* JOIN CLUB FORM DIALOG */}
+            {showJoinForm && joiningClub && (
+                <div style={{
+                    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                    backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 2000,
+                    backdropFilter: 'blur(5px)'
+                }}>
+                    <div style={{
+                        background: 'white', padding: '30px', borderRadius: '16px', width: '90%', maxWidth: '500px',
+                        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)', animation: 'scaleUp 0.3s ease',
+                        maxHeight: '90vh', overflowY: 'auto'
+                    }}>
+                        <h2 style={{ marginTop: 0, marginBottom: '20px', fontSize: '1.5rem', borderBottom: '1px solid #eee', paddingBottom: '10px' }}>
+                            Join {joiningClub.name}
+                        </h2>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                            <div>
+                                <label style={{ display: 'block', marginBottom: '5px', fontWeight: 600, fontSize: '0.9rem' }}>Tell us about yourself</label>
+                                <textarea
+                                    value={joinFormData.about}
+                                    onChange={(e) => setJoinFormData({ ...joinFormData, about: e.target.value })}
+                                    placeholder="Brief bio..."
+                                    style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ccc', minHeight: '60px' }}
+                                />
+                            </div>
+
+                            <div>
+                                <label style={{ display: 'block', marginBottom: '5px', fontWeight: 600, fontSize: '0.9rem' }}>Your Skills</label>
+                                <input
+                                    type="text"
+                                    value={joinFormData.skills}
+                                    onChange={(e) => setJoinFormData({ ...joinFormData, skills: e.target.value })}
+                                    placeholder="e.g. React, Design, Marketing"
+                                    style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ccc' }}
+                                />
+                            </div>
+
+                            <div>
+                                <label style={{ display: 'block', marginBottom: '5px', fontWeight: 600, fontSize: '0.9rem' }}>Preferred Team</label>
+                                <select
+                                    value={joinFormData.team}
+                                    onChange={(e) => setJoinFormData({ ...joinFormData, team: e.target.value })}
+                                    style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ccc' }}
+                                >
+                                    <option value="">Select a Team</option>
+                                    <option value="Technical">Technical</option>
+                                    <option value="Design">Design</option>
+                                    <option value="Marketing">Marketing / Affairs</option>
+                                    <option value="Management">Management</option>
+                                    <option value="Content">Content</option>
+                                    <option value="Logistics">Logistics</option>
+                                    <option value="Other">Other</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label style={{ display: 'block', marginBottom: '5px', fontWeight: 600, fontSize: '0.9rem' }}>Reason for Joining</label>
+                                <textarea
+                                    value={joinFormData.reason}
+                                    onChange={(e) => setJoinFormData({ ...joinFormData, reason: e.target.value })}
+                                    placeholder="Why do you want to join?"
+                                    style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ccc', minHeight: '60px' }}
+                                />
+                            </div>
+                        </div>
+
+                        <div style={{ marginTop: '25px', display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                            <button
+                                onClick={() => { setShowJoinForm(false); setJoiningClub(null); }}
+                                style={{
+                                    padding: '10px 20px', background: 'transparent', color: '#666', border: 'none',
+                                    borderRadius: '8px', cursor: 'pointer', fontWeight: 600
+                                }}
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={submitJoinForm}
+                                style={{
+                                    padding: '10px 20px', background: '#3b82f6', color: 'white', border: 'none',
+                                    borderRadius: '8px', cursor: 'pointer', fontWeight: 600
+                                }}
+                            >
+                                Submit Application
+                            </button>
                         </div>
                     </div>
                 </div>
