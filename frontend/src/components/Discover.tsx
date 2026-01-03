@@ -71,10 +71,6 @@ const Discover = () => {
 
     const fetchTeams = async (eventId: string) => {
         try {
-            // Get event details to know maxTeamMembers
-            const eventDoc = await getDoc(doc(db, 'events', eventId));
-            const maxMembers = eventDoc.data()?.maxTeamMembers || 4;
-
             const q = query(collection(db, 'teams'), where('eventId', '==', eventId));
             const querySnapshot = await getDocs(q);
             const teamsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Team));
@@ -83,15 +79,8 @@ const Discover = () => {
             const myOwnedTeam = teamsData.find(t => (t.leaderId || (t as any).leader_id) === user?.uid);
             setMyTeam(myOwnedTeam || null);
 
-            // Filter for public list:
-            // 1. Not full (current_members < maxMembers)
-            // 2. Not explicitly marked as full
-            // 3. Not my own team
-            setTeams(teamsData.filter(t => {
-                const current = t.current_members || 1;
-                const isActuallyFull = current >= maxMembers || t.isFull;
-                return !isActuallyFull && t.id !== myOwnedTeam?.id;
-            }));
+            // Filter for public list (not full, and not my own team ideally)
+            setTeams(teamsData.filter(t => !t.isFull && t.id !== myOwnedTeam?.id));
 
             if (myOwnedTeam) {
                 fetchRequests(myOwnedTeam.id);
@@ -113,47 +102,26 @@ const Discover = () => {
     };
 
     const handleAcceptRequest = async (req: TeamRequest) => {
-        if (!selectedEventId) return;
+        if (!myTeam) return;
         try {
-            // 1. Fetch latest team data to avoid stale state
-            // Need to find my team again from Firestore to get accurate current_members
-            const q = query(collection(db, 'teams'),
-                where('eventId', '==', selectedEventId),
-                where('leaderId', '==', user?.uid)
-            );
-            const snap = await getDocs(q);
-            if (snap.empty) {
-                alert("Team not found.");
-                return;
-            }
-            const teamDoc = snap.docs[0];
-            const teamData = teamDoc.data();
-            const currentMembers = teamData.current_members || 1;
+            // 1. Get Event Data to check limits
+            const eventSnap = await getDoc(doc(db, 'events', myTeam.eventId!));
+            const maxMembers = eventSnap.data()?.maxTeamMembers || 3;
 
-            // 2. Get Event Data to check limits
-            const eventSnap = await getDoc(doc(db, 'events', selectedEventId));
-            const maxMembers = eventSnap.data()?.maxTeamMembers || 4;
-
-            if (currentMembers >= maxMembers) {
+            if ((myTeam.current_members || 0) >= maxMembers) {
                 alert(`Team is full! Maximum ${maxMembers} members allowed.`);
                 return;
             }
 
-            // 3. Update Request Status
+            // 2. Update Request Status
             await updateDoc(doc(db, 'team_members', req.id), { status: 'accepted' });
-
-            // 4. Add user to Team members array and increment count
-            const newCount = currentMembers + 1;
-            const teamRef = doc(db, 'teams', teamDoc.id);
-            await updateDoc(teamRef, {
+            // 3. Add user to Team members array and increment count
+            await updateDoc(doc(db, 'teams', myTeam.id), {
                 members: arrayUnion(req.userId),
-                current_members: increment(1),
-                isFull: newCount >= maxMembers
+                current_members: increment(1)
             });
-
             alert("Member accepted!");
-            fetchRequests(teamDoc.id);
-            fetchTeams(selectedEventId); // Refresh UI state
+            fetchRequests(myTeam.id);
         } catch (e) {
             console.error("Error accepting:", e);
             alert("Failed to accept.");
@@ -248,20 +216,11 @@ const Discover = () => {
             const teamDoc = await getDoc(doc(db, 'teams', targetId));
             if (!teamDoc.exists()) { alert("Team not found"); return; }
 
-            const teamData = teamDoc.data();
-            const eventId = teamData.eventId;
+            const eventId = teamDoc.data().eventId;
             if (eventId) {
                 const already = await checkAlreadyInTeam(eventId);
                 if (already) {
                     alert("You are already in a team for this event!");
-                    return;
-                }
-
-                // Check if team is full
-                const eventSnap = await getDoc(doc(db, 'events', eventId));
-                const maxMembers = eventSnap.data()?.maxTeamMembers || 4;
-                if ((teamData.current_members || 1) >= maxMembers || teamData.isFull) {
-                    alert("This team is already full!");
                     return;
                 }
             }
@@ -335,7 +294,7 @@ const Discover = () => {
                         </div>
                         <p style={{ maxWidth: '600px', textAlign: 'center' }}>{event.description}</p>
                         <div style={{ marginTop: '10px', color: 'gold', fontSize: '0.85rem' }}>
-                            Limit: {event.maxTeamMembers || 4} members per team
+                            Limit: {event.maxTeamMembers || 3} members per team
                         </div>
                         <button
                             onClick={() => openMatchmaker(event.id)}
