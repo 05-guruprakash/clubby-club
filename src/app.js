@@ -8,12 +8,13 @@ const app = express();
 // Global middlewares
 app.use(cors());
 app.use(helmet());
-app.use(express.json());
+app.use(express.json({ limit: '15mb' }));
+app.use(express.urlencoded({ limit: '15mb', extended: true }));
 
 app.use(
   rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 100,
+    max: 1000,
   })
 );
 
@@ -84,9 +85,11 @@ app.get("/protected", verifyToken, (req, res) => {
 
 // 🔥 IMPORT ROUTES
 const clubRoutes = require("./routes/clubs.routes");
+const userRoutes = require("./routes/user.routes");
 
 // 🔥 MOUNT ROUTES
 app.use("/clubs", clubRoutes);
+app.use("/user", userRoutes);
 
 const eventRoutes = require("./routes/events.routes");
 app.use("/events", eventRoutes);

@@ -14,7 +14,8 @@ if (!admin.apps.length) {
         ...serviceAccount,
         private_key: privateKey
       }),
-      databaseURL: `https://${serviceAccount.project_id}.firebaseio.com`
+      databaseURL: `https://${serviceAccount.project_id}.firebaseio.com`,
+      storageBucket: "gdg-7327.appspot.com"
     });
     console.log(`🚀 Connected to PRODUCTION Firebase via serviceAccountKey.json`);
   } catch (err) {
@@ -33,7 +34,8 @@ if (!admin.apps.length) {
             clientEmail: email,
             privateKey: key.replace(/\\n/g, "\n")
           }),
-          databaseURL: `https://${projId}.firebaseio.com`
+          databaseURL: `https://${projId}.firebaseio.com`,
+          storageBucket: `${projId}.appspot.com`
         });
         console.log(`🚀 Connected to PRODUCTION Firebase via ENV Vars`);
       }

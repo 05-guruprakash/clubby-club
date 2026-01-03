@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { getDoc, doc, collection, query, where, getDocs, updateDoc } from 'firebase/firestore';
-import { signOut } from 'firebase/auth';
+import { getDoc, doc, collection, query, where, getDocs } from 'firebase/firestore';
+import { signOut, sendPasswordResetEmail } from 'firebase/auth';
 import { db, auth } from '../firebaseConfig';
 import { useAuth } from '../AuthContext';
 import AdminGuard from './AdminGuard';
@@ -8,22 +8,17 @@ import AdminTools from './AdminTools';
 
 // Types
 interface UserProfile {
-    // Basic Info
     username: string;
     full_name: string;
     email: string;
     phone: string;
     photoURL?: string;
-
-    // Academic Info
     regNo: string;
     department: string;
     year: string;
     college: string;
     officialMail: string;
-
-    // Club Info
-    joined_clubs?: string[]; // Array of Club IDs
+    joined_clubs?: string[];
 }
 
 interface ClubData {
@@ -36,14 +31,15 @@ interface EventData {
     id: string;
     title: string;
     date: string;
-    status: string; // upcoming/past
+    status: string;
 }
 
 interface ProfileProps {
     setView?: (view: string) => void;
+    isDarkMode?: boolean;
 }
 
-const Profile = ({ setView }: ProfileProps) => {
+const Profile = ({ setView, isDarkMode = true }: ProfileProps) => {
     const { user } = useAuth();
     const [profile, setProfile] = useState<UserProfile | null>(null);
     const [myClubs, setMyClubs] = useState<ClubData[]>([]);
@@ -51,12 +47,26 @@ const Profile = ({ setView }: ProfileProps) => {
     const [isEditing, setIsEditing] = useState(false);
     const [editForm, setEditForm] = useState<Partial<UserProfile>>({});
     const [loading, setLoading] = useState(true);
+    const [scrollY, setScrollY] = useState(0);
+
+    // New State for Upload
+    const [selectedFile, setSelectedFile] = useState<File | null>(null);
+    const [uploading, setUploading] = useState(false);
+    const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
+    const API_BASE = 'http://localhost:3001';
+
+    // Parallax scroll effect
+    useEffect(() => {
+        const handleScroll = () => setScrollY(window.scrollY);
+        window.addEventListener('scroll', handleScroll);
+        return () => window.removeEventListener('scroll', handleScroll);
+    }, []);
 
     useEffect(() => {
         const fetchData = async () => {
             if (!user) return;
             try {
-                // 1. Fetch User Profile
                 const userDoc = await getDoc(doc(db, 'users', user.uid));
                 if (userDoc.exists()) {
                     const data = userDoc.data();
@@ -76,7 +86,6 @@ const Profile = ({ setView }: ProfileProps) => {
                     setProfile(userProfile);
                     setEditForm(userProfile);
 
-                    // 2. Fetch Clubs
                     if (userProfile.joined_clubs && userProfile.joined_clubs.length > 0) {
                         const clubPromises = userProfile.joined_clubs.map(async (clubId) => {
                             try {
@@ -92,7 +101,6 @@ const Profile = ({ setView }: ProfileProps) => {
                         setMyClubs(clubs);
                     }
 
-                    // 3. Fetch Events
                     try {
                         const eventsQuery = query(collection(db, 'events'), where('participants', 'array-contains', user.uid));
                         const eventSnaps = await getDocs(eventsQuery);
@@ -128,21 +136,77 @@ const Profile = ({ setView }: ProfileProps) => {
         }
     };
 
+    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            if (file.size > 10 * 1024 * 1024) {
+                alert("File size exceeds 10MB limit.");
+                return;
+            }
+            setSelectedFile(file);
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                setPreviewUrl(reader.result as string);
+            };
+            reader.readAsDataURL(file);
+        }
+    };
+
     const handleSave = async () => {
         if (!user || !editForm) return;
+        setUploading(true);
         try {
-            await updateDoc(doc(db, 'users', user.uid), {
-                full_name: editForm.full_name,
-                phone: editForm.phone,
-                photoURL: editForm.photoURL,
-                username: editForm.username // Added username update
+            let photoBase64 = null;
+            let photoType = null;
+
+            if (selectedFile) {
+                const reader = new FileReader();
+                photoBase64 = await new Promise<string>((resolve) => {
+                    reader.onload = () => {
+                        const res = reader.result as string;
+                        resolve(res.split(',')[1]);
+                    };
+                    reader.readAsDataURL(selectedFile);
+                });
+                photoType = selectedFile.type;
+            }
+
+            const token = await user.getIdToken();
+            const response = await fetch(`${API_BASE}/user/update`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    full_name: editForm.full_name,
+                    username: editForm.username,
+                    phone: editForm.phone,
+                    photoBase64,
+                    photoType,
+                    photoURL: editForm.photoURL
+                })
             });
-            setProfile(editForm as UserProfile);
+
+            if (!response.ok) throw new Error("Backend update failed");
+
+            const result = await response.json();
+            const updatedProfile = {
+                ...editForm,
+                photoURL: result.photoURL || editForm.photoURL
+            } as UserProfile;
+
+            setProfile(updatedProfile);
+            setEditForm(updatedProfile);
             setIsEditing(false);
+            setSelectedFile(null);
+            setPreviewUrl(null);
             alert("Profile updated successfully!");
         } catch (e) {
             console.error("Update failed", e);
-            alert("Failed to update profile");
+            alert("Failed to update profile. Please try again.");
+        } finally {
+            setUploading(false);
         }
     };
 
@@ -150,8 +214,6 @@ const Profile = ({ setView }: ProfileProps) => {
         if (!user || !user.email) return;
         if (confirm(`Send password reset email to ${user.email}?`)) {
             try {
-                // Dynamic import to avoid import errors if module not found in tool context
-                const { sendPasswordResetEmail } = await import('firebase/auth');
                 await sendPasswordResetEmail(auth, user.email);
                 alert("Password reset email sent! Check your inbox.");
             } catch (e: any) {
@@ -161,282 +223,464 @@ const Profile = ({ setView }: ProfileProps) => {
         }
     };
 
-    if (loading) return <div style={{ color: 'white', padding: '20px' }}>Loading Profile...</div>;
-    if (!profile) return <div style={{ color: 'white', padding: '20px' }}>Profile not found.</div>;
-
-    const styles = {
-        container: {
-            maxWidth: '100%',
-            margin: '0 auto',
-            padding: '10px 10px 80px 10px', // Extra button padding for bottom navigation
-            color: '#e0e0e0',
-            fontFamily: "'Inter', 'Segoe UI', sans-serif"
-        },
-        profileCard: {
-            background: 'rgba(20, 20, 20, 0.95)',
-            padding: '24px',
-            borderRadius: '20px',
-            border: '1px solid #333',
-            marginBottom: '20px',
-            position: 'relative' as const
-        },
-        profileHeader: {
-            display: 'flex',
-            alignItems: 'center',
-            gap: '20px',
-            marginBottom: '24px'
-        },
-        avatar: {
-            width: '80px',
-            height: '80px',
-            borderRadius: '50%',
-            objectFit: 'cover' as const,
-            border: '2px solid #fff',
-            backgroundColor: '#333'
-        },
-        nameSection: {
-            flex: 1
-        },
-        name: {
-            fontSize: '1.5rem',
-            margin: '0',
-            color: '#fff',
-            fontWeight: 700
-        },
-        username: {
-            color: '#888',
-            margin: '4px 0 0 0',
-            fontSize: '0.9rem'
-        },
-        settingsBtn: {
-            position: 'absolute' as const,
-            top: '20px',
-            right: '20px',
-            background: '#333',
-            border: '1px solid #444',
-            color: '#fff',
-            borderRadius: '8px',
-            width: '36px',
-            height: '36px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: 'pointer'
-        },
-        infoGrid: {
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-            gap: '20px',
-            borderTop: '1px solid #333',
-            paddingTop: '20px'
-        },
-        infoItem: {
-            display: 'flex',
-            flexDirection: 'column' as const,
-            gap: '4px'
-        },
-        infoLabel: {
-            fontSize: '0.8rem',
-            color: '#888'
-        },
-        infoValue: {
-            color: '#fff',
-            fontWeight: 500,
-            fontSize: '0.95rem'
-        },
-        sectionCard: {
-            background: 'rgba(20, 20, 20, 0.95)',
-            padding: '24px',
-            borderRadius: '20px',
-            border: '1px solid #333',
-            marginBottom: '20px'
-        },
-        sectionTitle: {
-            fontSize: '1.1rem',
-            fontWeight: 700,
-            margin: '0 0 4px 0',
-            color: '#fff'
-        },
-        sectionSubtitle: {
-            fontSize: '0.85rem',
-            color: '#666',
-            marginBottom: '20px'
-        },
-        logoutBtn: {
-            width: '100%',
-            padding: '16px',
-            background: '#dc2626',
-            color: 'white',
-            border: 'none',
-            borderRadius: '12px',
-            fontWeight: 700,
-            fontSize: '1rem',
-            cursor: 'pointer',
-            marginBottom: '20px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '8px'
-        },
-        editInput: {
-            width: '100%',
-            background: '#222',
-            border: '1px solid #444',
-            color: 'white',
-            padding: '8px',
-            borderRadius: '6px',
-            marginBottom: '10px'
-        },
-        button: {
-            padding: '8px 16px',
-            borderRadius: '6px',
-            border: 'none',
-            cursor: 'pointer',
-            fontWeight: 600
-        }
+    // Theme colors
+    const theme = {
+        bg: isDarkMode ? '#050505' : '#f8f9fa',
+        cardBg: isDarkMode ? 'rgba(255,255,255,0.03)' : '#ffffff',
+        border: isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)',
+        text: isDarkMode ? '#ffffff' : '#111111',
+        subtext: isDarkMode ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)',
+        accent: '#bcec15',
+        accentSubtle: isDarkMode ? 'rgba(188, 236, 21, 0.1)' : 'rgba(188, 236, 21, 0.2)',
     };
 
+    if (loading) {
+        return (
+            <div style={{
+                height: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontFamily: '"Outfit", "Inter", sans-serif'
+            }}>
+                <div style={{
+                    color: theme.accent, fontSize: '1.2rem', fontWeight: '900',
+                    letterSpacing: '2px', animation: 'pulse 1.5s infinite'
+                }}>LOADING PROFILE...</div>
+            </div>
+        );
+    }
+
+    if (!profile) {
+        return (
+            <div style={{
+                height: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                color: theme.text, fontFamily: '"Outfit", "Inter", sans-serif'
+            }}>
+                <div>Profile not found.</div>
+            </div>
+        );
+    }
+
     return (
-        <div style={styles.container}>
-            {/* Profile Card */}
-            <div style={styles.profileCard}>
-                <button
-                    style={{
-                        position: 'absolute',
-                        top: '20px',
-                        right: '20px',
-                        background: '#333',
-                        border: '1px solid #444',
-                        color: 'white',
-                        borderRadius: '6px',
-                        padding: '8px 12px',
-                        cursor: 'pointer',
-                        fontWeight: 600,
-                        fontSize: '0.9rem'
-                    }}
-                    onClick={() => setIsEditing(!isEditing)}
-                >
-                    {isEditing ? 'Close' : 'Edit Profile'}
-                </button>
+        <div style={{
+            maxWidth: '900px',
+            margin: '0 auto',
+            padding: '20px',
+            paddingBottom: '120px',
+            color: theme.text,
+            fontFamily: '"Outfit", "Inter", sans-serif'
+        }}>
+            {/* Hero Header with Parallax */}
+            <div style={{
+                position: 'relative',
+                height: '280px',
+                borderRadius: '40px',
+                overflow: 'hidden',
+                marginBottom: '32px',
+                boxShadow: '0 20px 50px rgba(0,0,0,0.3)',
+                border: `1px solid ${theme.border}`,
+                animation: 'fadeIn 0.6s ease'
+            }}>
+                {/* Parallax Background */}
+                <div style={{
+                    position: 'absolute',
+                    top: 0, left: 0, right: 0, bottom: 0,
+                    background: `linear-gradient(135deg, ${isDarkMode ? '#0a0a0a' : '#e0e0e0'} 0%, ${isDarkMode ? '#1a1a1a' : '#f5f5f5'} 50%, #bcec15 200%)`,
+                    backgroundSize: 'cover',
+                    transform: `translateY(${scrollY * 0.2}px)`,
+                    transition: 'transform 0.1s ease-out',
+                    zIndex: 1
+                }}></div>
 
-                {isEditing ? (
-                    <div>
-                        <h3 style={{ marginBottom: '15px' }}>Edit Profile</h3>
-                        <input style={styles.editInput} value={editForm.full_name || ''} onChange={e => setEditForm({ ...editForm, full_name: e.target.value })} placeholder="Full Name" />
-                        <input style={styles.editInput} value={editForm.username || ''} onChange={e => setEditForm({ ...editForm, username: e.target.value })} placeholder="Username" />
-                        <input style={styles.editInput} value={editForm.phone || ''} onChange={e => setEditForm({ ...editForm, phone: e.target.value })} placeholder="Phone" />
-                        <input style={styles.editInput} value={editForm.photoURL || ''} onChange={e => setEditForm({ ...editForm, photoURL: e.target.value })} placeholder="Photo URL" />
+                {/* Decorative Elements */}
+                <div style={{
+                    position: 'absolute',
+                    top: '20%', right: '10%',
+                    width: '150px', height: '150px',
+                    borderRadius: '50%',
+                    background: `radial-gradient(circle, ${theme.accent}33 0%, transparent 70%)`,
+                    filter: 'blur(40px)',
+                    zIndex: 2,
+                    transform: `translate(${scrollY * 0.1}px, ${scrollY * 0.05}px)`
+                }}></div>
 
-                        <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
-                            <button style={{ ...styles.button, background: '#646cff', color: 'white' }} onClick={handleSave}>Save</button>
-                            <button style={{ ...styles.button, background: '#333', color: '#ccc' }} onClick={() => setIsEditing(false)}>Cancel</button>
+                {/* Profile Content */}
+                <div style={{
+                    position: 'relative', zIndex: 3, height: '100%',
+                    padding: '32px 40px',
+                    display: 'flex', flexDirection: 'column', justifyContent: 'center'
+                }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '28px' }}>
+                        {/* Avatar */}
+                        <div style={{
+                            width: '110px', height: '110px',
+                            minWidth: '110px',
+                            borderRadius: '32px',
+                            background: profile.photoURL ? `url(${profile.photoURL}) center/cover` : theme.accent,
+                            border: `3px solid ${theme.accent}`,
+                            boxShadow: `0 15px 40px ${theme.accent}33`,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontSize: '2.8rem', fontWeight: '950', color: '#000',
+                            overflow: 'hidden',
+                            transition: '0.3s cubic-bezier(0.23, 1, 0.32, 1)'
+                        }}>
+                            {!profile.photoURL && (profile.full_name?.[0]?.toUpperCase() || 'U')}
                         </div>
-                        <div style={{ marginTop: '20px', borderTop: '1px solid #333', paddingTop: '10px' }}>
-                            <button style={{ ...styles.button, background: '#333', color: 'white', marginRight: '10px' }} onClick={handleChangePassword}>Change Password</button>
+
+                        {/* Name & Username */}
+                        <div style={{ flex: 1 }}>
+                            <div style={{
+                                background: theme.accent, color: '#000',
+                                display: 'inline-block',
+                                padding: '4px 14px', borderRadius: '50px',
+                                fontSize: '0.65rem', fontWeight: '950', letterSpacing: '1.5px',
+                                marginBottom: '10px'
+                            }}>VERIFIED</div>
+                            <h1 style={{
+                                margin: 0, fontSize: '2.8rem', fontWeight: '950',
+                                letterSpacing: '-2.5px', lineHeight: '1',
+                                textShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                                color: '#fff'
+                            }}>{profile.full_name?.toUpperCase() || 'USER'}</h1>
+                            <p style={{
+                                margin: '6px 0 0 0', fontSize: '1.1rem',
+                                color: theme.accent, fontWeight: '700', opacity: 0.9,
+                                letterSpacing: '0.5px'
+                            }}>@{profile.username}</p>
+                        </div>
+
+                        {/* Edit Button */}
+                        <button
+                            onClick={() => setIsEditing(!isEditing)}
+                            style={{
+                                background: isEditing ? theme.accent : 'rgba(255,255,255,0.08)',
+                                backdropFilter: 'blur(20px)',
+                                color: isEditing ? '#000' : '#fff',
+                                border: `1px solid ${isEditing ? theme.accent : 'rgba(255,255,255,0.1)'}`,
+                                padding: '14px 28px', borderRadius: '18px',
+                                fontWeight: '900', cursor: 'pointer', fontSize: '0.75rem',
+                                transition: '0.3s cubic-bezier(0.23, 1, 0.32, 1)',
+                                letterSpacing: '0.5px'
+                            }}
+                        >{isEditing ? 'CLOSE PANEL' : 'EDIT PROFILE'}</button>
+                    </div>
+                </div>
+            </div>
+
+            {/* Edit Form Modal */}
+            {isEditing && (
+                <div style={{
+                    background: isDarkMode ? 'rgba(10,10,10,0.8)' : '#fff',
+                    backdropFilter: 'blur(30px)',
+                    borderRadius: '35px',
+                    padding: '35px',
+                    marginBottom: '32px',
+                    border: `1px solid ${theme.border}`,
+                    boxShadow: '0 30px 60px rgba(0,0,0,0.2)',
+                    animation: 'fadeIn 0.4s cubic-bezier(0.23, 1, 0.32, 1)'
+                }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                            {/* Small Preview in Form */}
+                            <div style={{
+                                width: '50px', height: '50px', borderRadius: '15px',
+                                background: previewUrl ? `url(${previewUrl}) center/cover` : (profile.photoURL ? `url(${profile.photoURL}) center/cover` : theme.accent),
+                                border: `2px solid ${theme.accent}`,
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                fontSize: '1rem', fontWeight: '950', color: '#000', overflow: 'hidden'
+                            }}>
+                                {!previewUrl && !profile.photoURL && (profile.full_name?.[0]?.toUpperCase() || 'U')}
+                            </div>
+                            <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: '950', color: theme.accent, letterSpacing: '1px' }}>PROFILE ADJUSTMENT</h3>
+                        </div>
+                        <button
+                            onClick={handleChangePassword}
+                            style={{
+                                background: 'transparent',
+                                border: 'none',
+                                color: theme.subtext,
+                                fontSize: '0.75rem',
+                                fontWeight: '800',
+                                cursor: 'pointer',
+                                textDecoration: 'underline'
+                            }}
+                        >RESET PASSWORD</button>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                        {[
+                            { key: 'full_name', label: 'FULL NAME', placeholder: 'Enter Name' },
+                            { key: 'username', label: 'NICKNAME', placeholder: 'Enter Username' },
+                            { key: 'phone', label: 'MOBILE CONTACT', placeholder: '+XX XXXXX XXXXX' }
+                        ].map(field => (
+                            <div key={field.key}>
+                                <label style={{
+                                    display: 'block', fontSize: '0.65rem', fontWeight: '950',
+                                    color: theme.subtext, marginBottom: '10px', letterSpacing: '1.5px'
+                                }}>{field.label}</label>
+                                <input
+                                    style={{
+                                        width: '100%',
+                                        background: isDarkMode ? 'rgba(255,255,255,0.03)' : '#f9f9f9',
+                                        border: `1px solid ${theme.border}`,
+                                        color: theme.text,
+                                        padding: '16px 20px',
+                                        borderRadius: '20px',
+                                        fontSize: '0.9rem',
+                                        fontWeight: '600',
+                                        outline: 'none',
+                                        transition: '0.3s ease'
+                                    }}
+                                    value={(editForm as any)[field.key] || ''}
+                                    onChange={e => setEditForm({ ...editForm, [field.key]: e.target.value })}
+                                    placeholder={field.placeholder}
+                                />
+                            </div>
+                        ))}
+
+                        {/* Avatar Upload Option */}
+                        <div>
+                            <label style={{
+                                display: 'block', fontSize: '0.65rem', fontWeight: '950',
+                                color: theme.subtext, marginBottom: '10px', letterSpacing: '1.5px'
+                            }}>AVATAR UPLOAD (MAX 10MB)</label>
+                            <label style={{
+                                width: '100%',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '12px',
+                                background: isDarkMode ? 'rgba(188, 236, 21, 0.05)' : '#f0f0f0',
+                                border: `1px dashed ${theme.accent}66`,
+                                color: theme.text,
+                                padding: '14px 20px',
+                                borderRadius: '20px',
+                                fontSize: '0.85rem',
+                                fontWeight: '700',
+                                cursor: 'pointer',
+                                transition: '0.3s'
+                            }}>
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                    <polyline points="17 8 12 3 7 8" />
+                                    <line x1="12" y1="3" x2="12" y2="15" />
+                                </svg>
+                                <span style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                                    {selectedFile ? selectedFile.name : 'CHOOSE PHOTO'}
+                                </span>
+                                <input type="file" accept="image/*" onChange={handleFileChange} style={{ display: 'none' }} />
+                            </label>
                         </div>
                     </div>
-                ) : (
-                    <>
-                        <div style={styles.profileHeader}>
-                            <img src={profile.photoURL || 'https://via.placeholder.com/150'} alt="Avatar" style={styles.avatar} />
-                            <div style={styles.nameSection}>
-                                <h2 style={styles.name}>{profile.full_name}</h2>
-                                <p style={styles.username}>@{profile.username}</p>
-                            </div>
-                        </div>
 
-                        <div style={styles.infoGrid}>
-                            <div style={styles.infoItem}>
-                                <span style={styles.infoLabel}>Branch</span>
-                                <span style={styles.infoValue}>{profile.department}</span>
-                            </div>
-                            <div style={styles.infoItem}>
-                                <span style={styles.infoLabel}>Year</span>
-                                <span style={styles.infoValue}>Year {profile.year}</span>
-                            </div>
-                            <div style={styles.infoItem}>
-                                <span style={styles.infoLabel}>Email</span>
-                                <span style={{ ...styles.infoValue, fontSize: '0.85rem' }}>{profile.officialMail}</span>
-                            </div>
-                            <div style={styles.infoItem}>
-                                <span style={styles.infoLabel}>Phone</span>
-                                <span style={styles.infoValue}>{profile.phone || 'N/A'}</span>
-                            </div>
-                            <div style={{ ...styles.infoItem, gridColumn: '1 / -1' }}>
-                                <span style={styles.infoLabel}>Register Number</span>
-                                <span style={styles.infoValue}>{profile.regNo}</span>
-                            </div>
-                            <div style={{ ...styles.infoItem, gridColumn: '1 / -1' }}>
-                                <span style={styles.infoLabel}>College</span>
-                                <span style={styles.infoValue}>{profile.college}</span>
-                            </div>
-                        </div>
-                    </>
-                )}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginTop: '30px' }}>
+                        <button
+                            onClick={handleSave}
+                            disabled={uploading}
+                            style={{
+                                padding: '18px', borderRadius: '22px',
+                                background: uploading ? theme.subtext : theme.accent, color: '#000',
+                                fontWeight: '950', border: 'none', cursor: 'pointer', fontSize: '0.9rem',
+                                transition: '0.3s', opacity: uploading ? 0.7 : 1
+                            }}
+                        >{uploading ? 'UPLOADING...' : 'SAVE UPDATES'}</button>
+                        <button
+                            onClick={() => {
+                                setIsEditing(false);
+                                setSelectedFile(null);
+                                setPreviewUrl(null);
+                            }}
+                            style={{
+                                padding: '18px', borderRadius: '22px',
+                                background: 'transparent', color: theme.text,
+                                fontWeight: '900', border: `1px solid ${theme.border}`, cursor: 'pointer', fontSize: '0.9rem',
+                                transition: '0.3s'
+                            }}
+                        >CANCEL</button>
+                    </div>
+                </div>
+            )}
+
+            {/* Stats Row */}
+            <div style={{
+                display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px',
+                marginBottom: '24px', animation: 'fadeIn 0.5s ease 0.1s both'
+            }}>
+                {[
+                    { label: 'CLUBS', val: myClubs.length },
+                    { label: 'EVENTS', val: myEvents.length },
+                    { label: 'YEAR', val: profile.year || 'N/A' }
+                ].map((s, i) => (
+                    <div key={i} style={{
+                        background: theme.cardBg, padding: '24px', borderRadius: '28px',
+                        border: `1px solid ${theme.border}`, textAlign: 'center',
+                        transition: '0.3s'
+                    }}>
+                        <div style={{ fontSize: '0.6rem', fontWeight: '950', letterSpacing: '1.5px', color: theme.subtext, marginBottom: '6px' }}>{s.label}</div>
+                        <div style={{ fontSize: '1.8rem', fontWeight: '950', color: theme.text, letterSpacing: '-1px' }}>{s.val}</div>
+                    </div>
+                ))}
+            </div>
+
+            {/* Info Cards */}
+            <div style={{
+                display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px',
+                marginBottom: '24px', animation: 'fadeIn 0.5s ease 0.2s both'
+            }}>
+                {[
+                    { label: 'DEPARTMENT', val: profile.department },
+                    { label: 'COLLEGE', val: profile.college },
+                    { label: 'REG NO', val: profile.regNo },
+                    { label: 'EMAIL', val: profile.officialMail }
+                ].map((item, i) => (
+                    <div key={i} style={{
+                        background: theme.cardBg, padding: '20px 24px', borderRadius: '24px',
+                        border: `1px solid ${theme.border}`
+                    }}>
+                        <div style={{ fontSize: '0.55rem', fontWeight: '950', letterSpacing: '1.5px', color: theme.subtext, marginBottom: '6px' }}>{item.label}</div>
+                        <div style={{ fontSize: '0.95rem', fontWeight: '700', color: theme.text }}>{item.val}</div>
+                    </div>
+                ))}
             </div>
 
             {/* My Clubs Section */}
-            <div style={styles.sectionCard}>
-                <h3 style={styles.sectionTitle}>My Clubs</h3>
-                <p style={styles.sectionSubtitle}>Clubs you are a member of</p>
+            <div style={{
+                marginBottom: '24px', animation: 'fadeIn 0.5s ease 0.3s both'
+            }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                    <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '950', letterSpacing: '0.5px' }}>MY CLUBS</h2>
+                    <div style={{ padding: '4px 12px', background: theme.accentSubtle, color: theme.accent, borderRadius: '50px', fontSize: '0.6rem', fontWeight: '900' }}>{myClubs.length} JOINED</div>
+                </div>
 
                 {myClubs.length > 0 ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                         {myClubs.map(club => (
-                            <div key={club.id} style={{ background: '#2a2a2a', padding: '16px', borderRadius: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div
+                                key={club.id}
+                                style={{
+                                    background: theme.cardBg, padding: '20px 24px', borderRadius: '24px',
+                                    border: `1px solid ${theme.border}`, display: 'flex',
+                                    justifyContent: 'space-between', alignItems: 'center',
+                                    transition: '0.3s', cursor: 'pointer'
+                                }}
+                                onClick={() => setView && setView('clubs')}
+                            >
                                 <div>
-                                    <h4 style={{ margin: '0 0 5px 0' }}>{club.name}</h4>
-                                    <span style={{ fontSize: '0.8rem', color: '#888', background: '#1a1a1a', padding: '2px 8px', borderRadius: '4px' }}>{club.role}</span>
+                                    <h4 style={{ margin: '0 0 4px 0', fontWeight: '800', fontSize: '1rem' }}>{club.name}</h4>
+                                    <span style={{
+                                        fontSize: '0.65rem', fontWeight: '900', letterSpacing: '1px',
+                                        color: theme.accent, opacity: 0.7
+                                    }}>{club.role.toUpperCase()}</span>
                                 </div>
-                                <button style={{ background: 'none', border: 'none', color: '#646cff', cursor: 'pointer', fontWeight: 600 }} onClick={() => setView && setView('clubs')}>Visit</button>
+                                <div style={{ color: theme.accent, fontWeight: '900', fontSize: '0.8rem' }}>VIEW &rarr;</div>
                             </div>
                         ))}
                     </div>
                 ) : (
-                    <p style={{ color: '#666', fontStyle: 'italic' }}>You haven't joined any clubs yet.</p>
+                    <div style={{
+                        background: theme.cardBg, padding: '40px', borderRadius: '28px',
+                        border: `1px dashed ${theme.border}`, textAlign: 'center'
+                    }}>
+                        <p style={{ opacity: 0.4, fontWeight: '700', margin: 0 }}>No clubs joined yet.</p>
+                        <button
+                            onClick={() => setView && setView('clubs')}
+                            style={{
+                                marginTop: '16px', background: theme.accent, color: '#000',
+                                border: 'none', padding: '12px 24px', borderRadius: '14px',
+                                fontWeight: '900', cursor: 'pointer'
+                            }}
+                        >EXPLORE CLUBS</button>
+                    </div>
                 )}
             </div>
 
             {/* Events Section */}
-            <div style={styles.sectionCard}>
-                <h3 style={styles.sectionTitle}>Events</h3>
-                <p style={styles.sectionSubtitle}>Your registered and past events</p>
+            <div style={{ marginBottom: '24px', animation: 'fadeIn 0.5s ease 0.4s both' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                    <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '950', letterSpacing: '0.5px' }}>MY EVENTS</h2>
+                    <div style={{ padding: '4px 12px', background: theme.accentSubtle, color: theme.accent, borderRadius: '50px', fontSize: '0.6rem', fontWeight: '900' }}>{myEvents.length} REGISTERED</div>
+                </div>
 
-                <h4 style={{ marginTop: '0', fontSize: '0.95rem', color: '#ddd' }}>Registered Events</h4>
-                {myEvents.filter(e => e.status === 'upcoming').length > 0 ? (
-                    <ul style={{ listStyle: 'none', padding: 0, marginBottom: '20px' }}>
-                        {myEvents.filter(e => e.status === 'upcoming').map(e => (
-                            <li key={e.id} style={{ marginBottom: '10px', fontSize: '0.9rem' }}>📅 {e.title} - <span style={{ color: '#646cff' }}>{e.date}</span></li>
-                        ))}
-                    </ul>
-                ) : (
-                    <p style={{ color: '#666', fontSize: '0.9rem', marginBottom: '20px' }}>No registered events yet.</p>
-                )}
+                <div style={{ background: theme.cardBg, borderRadius: '28px', border: `1px solid ${theme.border}`, overflow: 'hidden' }}>
+                    {/* Upcoming */}
+                    <div style={{ padding: '20px 24px', borderBottom: `1px solid ${theme.border}` }}>
+                        <h4 style={{ margin: '0 0 12px 0', fontSize: '0.7rem', fontWeight: '950', color: theme.accent, letterSpacing: '1.5px' }}>UPCOMING</h4>
+                        {myEvents.filter(e => e.status === 'upcoming').length > 0 ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                {myEvents.filter(e => e.status === 'upcoming').map(e => (
+                                    <div key={e.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <span style={{ fontWeight: '700', fontSize: '0.9rem' }}>📅 {e.title}</span>
+                                        <span style={{ fontSize: '0.75rem', color: theme.accent, fontWeight: '700' }}>{e.date}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <p style={{ margin: 0, opacity: 0.4, fontSize: '0.85rem' }}>No upcoming events.</p>
+                        )}
+                    </div>
 
-                <h4 style={{ marginTop: '0', fontSize: '0.95rem', color: '#ddd', borderTop: '1px solid #333', paddingTop: '15px' }}>Past Events</h4>
-                {myEvents.filter(e => e.status === 'past').length > 0 ? (
-                    <ul style={{ listStyle: 'none', padding: 0 }}>
-                        {myEvents.filter(e => e.status === 'past').map(e => (
-                            <li key={e.id} style={{ marginBottom: '10px', fontSize: '0.9rem', color: '#888' }}>✔️ {e.title}</li>
-                        ))}
-                    </ul>
-                ) : (
-                    <p style={{ color: '#666', fontSize: '0.9rem' }}>No past events yet.</p>
-                )}
+                    {/* Past */}
+                    <div style={{ padding: '20px 24px' }}>
+                        <h4 style={{ margin: '0 0 12px 0', fontSize: '0.7rem', fontWeight: '950', color: theme.subtext, letterSpacing: '1.5px' }}>COMPLETED</h4>
+                        {myEvents.filter(e => e.status === 'past').length > 0 ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                {myEvents.filter(e => e.status === 'past').map(e => (
+                                    <div key={e.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', opacity: 0.6 }}>
+                                        <span style={{ color: theme.accent }}>✓</span>
+                                        <span style={{ fontWeight: '600', fontSize: '0.85rem' }}>{e.title}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <p style={{ margin: 0, opacity: 0.4, fontSize: '0.85rem' }}>No past events.</p>
+                        )}
+                    </div>
+                </div>
             </div>
 
+            {/* Admin Section */}
             <AdminGuard>
-                <div style={{ ...styles.sectionCard, border: '1px solid #4f46e5' }}>
-                    <h3 style={{ ...styles.sectionTitle, color: '#4f46e5' }}>Admin Controls</h3>
-                    <p style={styles.sectionSubtitle}>Manage your club settings</p>
+                <div style={{
+                    marginBottom: '24px', animation: 'fadeIn 0.5s ease 0.5s both',
+                    background: theme.accentSubtle, borderRadius: '28px',
+                    padding: '24px', border: `1px solid ${theme.accent}33`
+                }}>
+                    <h3 style={{ margin: '0 0 8px 0', fontSize: '1rem', fontWeight: '950', color: theme.accent }}>ADMIN CONTROLS</h3>
+                    <p style={{ margin: '0 0 20px 0', fontSize: '0.8rem', opacity: 0.6 }}>Manage club settings and members</p>
                     <AdminTools />
                 </div>
             </AdminGuard>
 
-            <button style={styles.logoutBtn} onClick={handleLogout}>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
-                Logout
+            {/* Logout Button */}
+            <button
+                onClick={handleLogout}
+                style={{
+                    width: '100%', padding: '18px', borderRadius: '20px',
+                    background: 'rgba(220, 38, 38, 0.15)', color: '#ff4444',
+                    border: '1px solid rgba(220, 38, 38, 0.2)', fontWeight: '900',
+                    cursor: 'pointer', fontSize: '0.9rem', display: 'flex',
+                    alignItems: 'center', justifyContent: 'center', gap: '10px',
+                    transition: '0.3s', animation: 'fadeIn 0.5s ease 0.6s both'
+                }}
+            >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                    <polyline points="16 17 21 12 16 7" />
+                    <line x1="21" y1="12" x2="9" y2="12" />
+                </svg>
+                LOGOUT
             </button>
+
+            {/* Animations */}
+            <style>{`
+                @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@100;300;400;500;600;700;800;900&display=swap');
+                @keyframes fadeIn { 
+                    from { opacity: 0; transform: translateY(15px); } 
+                    to { opacity: 1; transform: translateY(0); } 
+                }
+                @keyframes pulse { 
+                    0% { opacity: 0.6; } 
+                    50% { opacity: 1; } 
+                    100% { opacity: 0.6; } 
+                }
+            `}</style>
         </div>
     );
 };

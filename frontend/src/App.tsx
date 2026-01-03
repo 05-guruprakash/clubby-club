@@ -81,7 +81,7 @@ const AppContent = () => {
       {currentView === 'clubs' && <Clubs isDarkMode={isDarkMode} />}
       {currentView === 'feed' && <Feed isDarkMode={isDarkMode} />}
       {currentView === 'notifications' && <Notifications />}
-      {currentView === 'profile' && <Profile setView={setView} />}
+      {currentView === 'profile' && <Profile setView={setView} isDarkMode={isDarkMode} />}
     </GlobalShell>
   );
 };
