@@ -78,6 +78,7 @@ const Discover = () => {
         if (!dateStr) return new Date(); // Fallback to now
         try {
             const d = new Date(dateStr);
+            if (isNaN(d.getTime())) return new Date(); // Invalid date check
             if (timeStr) {
                 const [hours, minutes] = timeStr.split(':').map(Number);
                 if (!isNaN(hours) && !isNaN(minutes)) {
@@ -90,6 +91,10 @@ const Discover = () => {
 
     const downloadICS = (event: Event) => {
         const startDate = parseEventDate(event.date as string, event.time as string);
+        if (isNaN(startDate.getTime())) {
+            alert('Invalid event date');
+            return;
+        }
         const endDate = new Date(startDate.getTime() + 60 * 60 * 1000); // Assume 1 hour duration
 
         const formatDate = (date: Date) => date.toISOString().replace(/-|:|\.\d+/g, "");
@@ -139,6 +144,10 @@ END:VCALENDAR`;
 
     const addToGoogleCalendar = (event: Event) => {
         const startDate = parseEventDate(event.date as string, event.time as string);
+        if (isNaN(startDate.getTime())) {
+            alert('Invalid event date');
+            return;
+        }
         const endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
 
         const formatDate = (date: Date) => date.toISOString().replace(/-|:|\.\d+/g, "");
@@ -381,142 +390,312 @@ END:VCALENDAR`;
         }
     };
 
+    // --- RENDER HELPERS ---
+
+    // Generate a consistent gradient based on event ID to make it look distinct but thematic
+    const getGradient = (id: string) => {
+        const colors = [
+            'linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%)', // Deep Purple
+            'linear-gradient(135deg, #000000 0%, #1a1a1a 50%, #434343 100%)', // Charcoal
+            'linear-gradient(135deg, #16222a 0%, #3a6073 100%)', // Cool Blue
+            'linear-gradient(135deg, #1f4037 0%, #99f2c8 100%)', // Volt-ish Green darker
+        ];
+        const index = id.charCodeAt(0) % colors.length;
+        return colors[index];
+    };
+
     return (
         <div style={{
-            height: '100vh',
+            height: '100%', // Take full available height from parent
             overflowY: 'scroll',
-            scrollSnapType: 'y mandatory',
+            scrollSnapType: 'y mandatory', // strict snapping
             scrollBehavior: 'smooth',
-            position: 'relative'
+            background: 'transparent',
+            color: 'inherit',
+            scrollbarWidth: 'none',
+            position: 'relative',
+            display: 'flex',
+            flexDirection: 'column',
+            // Removed padding and gap for true full screen
+            padding: 0,
+            gap: 0,
         }}>
-            {/* Top Right Request Notification */}
+            {/* Top Right Request Notification - Floating nicely */}
             {myTeam && requests.length > 0 && (
-                <div style={{
-                    position: 'fixed',
-                    top: '20px',
-                    right: '20px',
-                    zIndex: 2000,
-                    backgroundColor: '#ff4444',
-                    color: 'white',
-                    padding: '10px 15px',
-                    borderRadius: '20px',
-                    cursor: 'pointer',
-                    boxShadow: '0 2px 10px rgba(0,0,0,0.3)',
-                    fontWeight: 'bold'
-                }} onClick={() => myTeam.eventId && openMatchmaker(myTeam.eventId)}>
-                    🔔 {requests.length} Request{requests.length > 1 ? 's' : ''}
+                <div
+                    onClick={() => myTeam.eventId && openMatchmaker(myTeam.eventId)}
+                    style={{
+                        position: 'fixed',
+                        top: '80px',
+                        right: '30px',
+                        zIndex: 2000,
+                        background: 'rgba(239, 68, 68, 0.9)',
+                        backdropFilter: 'blur(10px)',
+                        color: 'white',
+                        padding: '12px 24px',
+                        borderRadius: '30px',
+                        cursor: 'pointer',
+                        boxShadow: '0 10px 30px rgba(239, 68, 68, 0.4)',
+                        fontWeight: 'bold',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px',
+                        animation: 'pulse 2s infinite'
+                    }}
+                >
+                    <span style={{ fontSize: '1.2rem' }}>🔔</span>
+                    <span>{requests.length} Request{requests.length > 1 ? 's' : ''} Pending</span>
                 </div>
             )}
 
             {events.length === 0 ? (
-                <div style={{ height: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-                    <p>No events found. (Or loading...)</p>
+                <div style={{ height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', gap: '20px' }}>
+                    <div style={{ width: '40px', height: '40px', border: '3px solid rgba(255,255,255,0.1)', borderTop: '3px solid #bcec15', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+                    <p style={{ color: '#666' }}>Finding events...</p>
                 </div>
             ) : (
                 events.map(event => (
                     <div key={event.id} style={{
-                        height: '100vh',
+                        height: '100%', // Strict full height
                         width: '100%',
-                        scrollSnapAlign: 'start',
+                        flexShrink: 0,
+                        scrollSnapAlign: 'start', // Align to start of viewport
+                        position: 'relative',
                         display: 'flex',
-                        flexDirection: 'column',
                         justifyContent: 'center',
-                        alignItems: 'center',
-                        borderBottom: '1px solid #444',
-                        background: '#1a1a1a', // Dark theme placeholder
-                        color: 'white',
-                        position: 'relative'
+                        overflow: 'hidden',
+                        margin: 0 // No margins
                     }}>
-                        <h1>{event.title}</h1>
-                        <div style={{ display: 'flex', gap: '20px', marginBottom: '15px', color: '#ccc', fontSize: '0.9rem' }}>
-                            <span>📅 {formatValue(event.date)}</span>
-                            <span>⏰ {formatValue(event.time)}</span>
-                            <span>📍 {formatValue(event.venue)}</span>
-                        </div>
-                        <p style={{ maxWidth: '600px', textAlign: 'center' }}>{event.description}</p>
-                        <div style={{ marginTop: '10px', color: 'gold', fontSize: '0.85rem' }}>
-                            Limit: {event.maxTeamMembers || 3} members per team
-                        </div>
-                        <button
-                            onClick={() => openMatchmaker(event.id)}
-                            style={{
-                                marginTop: '20px',
-                                padding: '15px 30px',
-                                fontSize: '1.2rem',
-                                cursor: 'pointer',
-                                background: '#646cff',
-                                color: 'white',
-                                border: 'none',
-                                borderRadius: '8px'
-                            }}
-                        >
-                            Register
-                        </button>
-                        <div style={{ marginTop: '15px', display: 'flex', gap: '10px' }}>
-                            <button
-                                onClick={() => addToGoogleCalendar(event)}
-                                style={{ background: 'transparent', border: '1px solid #777', color: '#ccc', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '0.8rem' }}
-                            >
-                                + Google Calendar
-                            </button>
-                            <button
-                                onClick={() => downloadICS(event)}
-                                style={{ background: 'transparent', border: '1px solid #777', color: '#ccc', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '0.8rem' }}
-                            >
-                                + Download Reminder (.ics)
-                            </button>
+                        {/* 1. Background Layer with Parallax using fixed attachment */}
+                        <div style={{
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                            width: '100%',
+                            height: '100%',
+                            background: event.posterUrl ? `url(${event.posterUrl}) center/cover no-repeat fixed` : getGradient(event.id), // 'fixed' creates the parallax
+                            backgroundAttachment: 'fixed', // Explicitly set for parallax
+                            backgroundSize: 'cover',
+                            backgroundPosition: 'center',
+                            filter: event.posterUrl ? 'brightness(0.5)' : 'none',
+                            zIndex: 1
+                        }} />
+
+                        {/* 2. Gradient Overlay */}
+                        <div style={{
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                            width: '100%',
+                            height: '100%',
+                            background: 'linear-gradient(to top, #000 0%, transparent 100%)',
+                            zIndex: 2
+                        }} />
+
+                        {/* 3. Main Content Content */}
+                        <div style={{
+                            position: 'relative',
+                            zIndex: 3,
+                            width: '100%',
+                            maxWidth: '1200px',
+                            height: '100%',
+                            padding: '60px 40px',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            justifyContent: 'flex-end',
+                            boxSizing: 'border-box'
+                        }}>
+                            {/* Top Content: Title & Meta */}
+                            <div style={{ marginBottom: 'auto', paddingTop: '40px' }}>
+                                <div style={{
+                                    display: 'inline-block',
+                                    padding: '8px 20px',
+                                    background: 'rgba(188, 236, 21, 0.15)',
+                                    border: '1px solid #bcec15',
+                                    borderRadius: '30px',
+                                    color: '#bcec15',
+                                    fontWeight: 'bold',
+                                    marginBottom: '20px',
+                                    fontSize: '0.9rem',
+                                    letterSpacing: '2px',
+                                    textTransform: 'uppercase'
+                                }}>
+                                    Upcoming Event
+                                </div>
+                                <h1 style={{
+                                    fontSize: '6rem', // Even bigger
+                                    fontWeight: '900',
+                                    margin: '0 0 10px 0',
+                                    lineHeight: 0.9,
+                                    textShadow: '0 10px 40px rgba(0,0,0,0.8)',
+                                    letterSpacing: '-3px'
+                                }}>
+                                    {event.title.toUpperCase()}
+                                </h1>
+                                <p style={{
+                                    fontSize: '1.3rem',
+                                    color: 'rgba(255,255,255,0.85)',
+                                    maxWidth: '700px',
+                                    marginBottom: '40px',
+                                    lineHeight: '1.5'
+                                }}>
+                                    {event.description}
+                                </p>
+                            </div>
+
+
+                            {/* Bottom Content: Layout Row */}
+                            <div style={{
+                                display: 'flex',
+                                alignItems: 'flex-end',
+                                justifyContent: 'space-between',
+                                paddingBottom: '40px', // More padding from bottom
+                                flexWrap: 'wrap',
+                                gap: '30px'
+                            }}>
+                                {/* Left Side Details */}
+                                <div style={{ display: 'flex', gap: '50px', fontSize: '1.2rem', color: 'rgba(255,255,255,0.9)' }}>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                                        <span style={{ fontSize: '0.8rem', color: '#888', textTransform: 'uppercase', letterSpacing: '1px' }}>Date</span>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 'bold' }}>
+                                            <span style={{ color: '#bcec15' }}>📅</span> {formatValue(event.date)}
+                                        </div>
+                                    </div>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                                        <span style={{ fontSize: '0.8rem', color: '#888', textTransform: 'uppercase', letterSpacing: '1px' }}>Time</span>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 'bold' }}>
+                                            <span style={{ color: '#bcec15' }}>⏰</span> {formatValue(event.time)}
+                                        </div>
+                                    </div>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                                        <span style={{ fontSize: '0.8rem', color: '#888', textTransform: 'uppercase', letterSpacing: '1px' }}>Location</span>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 'bold' }}>
+                                            <span style={{ color: '#bcec15' }}>📍</span> {formatValue(event.venue)}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Right Side: Actions (Bottom Horizontal) */}
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '20px' }}>
+                                    {/* Register Button (Prominent) */}
+                                    <button
+                                        onClick={() => openMatchmaker(event.id)}
+                                        style={{
+                                            padding: '20px 50px',
+                                            borderRadius: '50px',
+                                            background: '#bcec15',
+                                            color: 'black',
+                                            border: 'none',
+                                            fontSize: '1.2rem',
+                                            fontWeight: '900',
+                                            cursor: 'pointer',
+                                            boxShadow: '0 0 50px rgba(188, 236, 21, 0.5)',
+                                            transition: 'transform 0.2s',
+                                            textTransform: 'uppercase',
+                                            letterSpacing: '1px',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '10px'
+                                        }}
+                                        onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
+                                        onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                                    >
+                                        Register Event ➔
+                                    </button>
+
+                                    {/* Expanded Action Buttons Row */}
+                                    <div style={{ display: 'flex', gap: '15px' }}>
+                                        {[
+                                            { label: 'Add to Calendar', action: () => addToGoogleCalendar(event) },
+                                            { label: 'Add to Outlook', action: () => downloadICS(event) },
+                                            { label: `Max Members: ${event.maxTeamMembers || 3}`, action: () => { } }
+                                        ].map((btn, idx) => (
+                                            <button
+                                                key={idx}
+                                                onClick={btn.action}
+                                                style={{
+                                                    padding: '12px 20px',
+                                                    borderRadius: '30px', // Pill shape
+                                                    background: 'rgba(255,255,255,0.1)',
+                                                    backdropFilter: 'blur(10px)',
+                                                    border: '1px solid rgba(255,255,255,0.2)',
+                                                    color: 'white',
+                                                    fontSize: '0.9rem',
+                                                    fontWeight: 'bold',
+                                                    cursor: 'pointer',
+                                                    transition: 'all 0.2s',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    gap: '8px'
+                                                }}
+                                                onMouseEnter={(e) => { e.currentTarget.style.background = 'white'; e.currentTarget.style.color = 'black'; }}
+                                                onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; e.currentTarget.style.color = 'white'; }}
+                                            >
+                                                {btn.label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 ))
             )}
 
-            {/* Matchmaker Modal */}
+            {/* Matchmaker Modal - Styled Dark/Volt */}
             {showMatchmaker && selectedEventId && (
                 <div style={{
                     position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-                    backgroundColor: 'rgba(0,0,0,0.9)', color: 'white',
+                    backgroundColor: 'rgba(0,0,0,0.9)',
+                    backdropFilter: 'blur(20px)',
+                    color: 'white',
                     display: 'flex', justifyContent: 'center', alignItems: 'center',
-                    zIndex: 1000
+                    zIndex: 3000
                 }}>
                     <div style={{
-                        background: '#333',
-                        padding: '30px',
-                        borderRadius: '15px',
+                        background: '#111',
+                        border: '1px solid #333',
+                        padding: '40px',
+                        borderRadius: '24px',
                         width: '90%',
                         maxWidth: '600px',
                         maxHeight: '90vh',
-                        overflowY: 'auto'
+                        overflowY: 'auto',
+                        boxShadow: '0 20px 50px rgba(0,0,0,0.5)'
                     }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                            <h2 style={{ margin: 0 }}>Registration</h2>
-                            <button onClick={() => setShowMatchmaker(false)} style={{ background: 'transparent', border: '1px solid #777', color: 'white', cursor: 'pointer' }}>Close</button>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' }}>
+                            <h2 style={{ margin: 0, fontSize: '2rem', fontWeight: '800' }}>REGISTRATION</h2>
+                            <button onClick={() => setShowMatchmaker(false)} style={{ background: 'transparent', border: 'none', color: '#666', cursor: 'pointer', fontSize: '1.5rem' }}>✕</button>
                         </div>
 
+                        {/* ... Existing logic for Teams kept, just container styled above ... */}
+                        {/* Wrapper for the complex logical content below to keep it neat but styled */}
                         <div style={{ display: 'flex', gap: '20px', flexDirection: 'column' }}>
 
                             {/* My Team Section */}
                             {myTeam ? (
-                                <div style={{ border: '1px solid gold', padding: '20px', borderRadius: '10px' }}>
-                                    <h3>Manage My Team: {myTeam.name}</h3>
-                                    <p>Members: {myTeam.current_members}</p>
-                                    <h4>Pending Requests</h4>
-                                    {requests.length === 0 ? <p>No pending requests.</p> : (
-                                        <ul>
+                                <div style={{ border: '1px solid #333', background: '#1a1a1a', padding: '25px', borderRadius: '16px' }}>
+                                    <h3 style={{ color: '#bcec15', margin: '0 0 10px 0' }}>{myTeam.name}</h3>
+                                    <p style={{ color: '#888', margin: 0 }}>Members: {myTeam.current_members} / 3</p>
+
+                                    <h4 style={{ marginTop: '20px', borderBottom: '1px solid #333', paddingBottom: '10px' }}>Pending Requests</h4>
+                                    {requests.length === 0 ? <p style={{ color: '#666', fontStyle: 'italic' }}>No pending requests.</p> : (
+                                        <ul style={{ listStyle: 'none', padding: 0 }}>
                                             {requests.map(req => (
-                                                <li key={req.id} style={{ display: 'flex', flexDirection: 'column', marginBottom: '10px', background: 'rgba(255,255,255,0.05)', padding: '10px', borderRadius: '8px' }}>
-                                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
-                                                        <span style={{ fontWeight: 'bold' }}>{req.userName || req.userId}</span>
-                                                        <div>
-                                                            <button onClick={() => handleAcceptRequest(req)} style={{ color: '#4ade80', marginRight: '10px', background: 'transparent', border: '1px solid #4ade80', borderRadius: '4px', cursor: 'pointer' }}>Accept</button>
-                                                            <button onClick={() => handleRejectRequest(req.id)} style={{ color: '#ef4444', background: 'transparent', border: '1px solid #ef4444', borderRadius: '4px', cursor: 'pointer' }}>Reject</button>
+                                                <li key={req.id} style={{ display: 'flex', flexDirection: 'column', marginTop: '10px', background: '#222', padding: '15px', borderRadius: '12px' }}>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
+                                                        <span style={{ fontWeight: 'bold', fontSize: '1.1rem' }}>{req.userName || req.userId}</span>
+                                                        <div style={{ display: 'flex', gap: '10px' }}>
+                                                            <button onClick={() => handleAcceptRequest(req)} style={{ color: 'black', background: '#bcec15', border: 'none', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}>Accept</button>
+                                                            <button onClick={() => handleRejectRequest(req.id)} style={{ color: 'white', background: '#333', border: '1px solid #444', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer' }}>Reject</button>
                                                         </div>
                                                     </div>
-                                                    {/* Show Application Details if available */}
                                                     {req.reason && (
-                                                        <div style={{ fontSize: '0.85rem', color: '#ccc', marginTop: '5px', paddingLeft: '10px', borderLeft: '2px solid #555' }}>
-                                                            <div><strong>Bio:</strong> {req.bio}</div>
-                                                            <div><strong>Skills:</strong> {req.skills}</div>
-                                                            <div><strong>Why:</strong> {req.reason}</div>
+                                                        <div style={{ fontSize: '0.9rem', color: '#aaa', marginTop: '10px', padding: '10px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px' }}>
+                                                            <div style={{ marginBottom: '4px' }}><strong style={{ color: '#666' }}>Role:</strong> {req.bio}</div>
+                                                            <div style={{ marginBottom: '4px' }}><strong style={{ color: '#666' }}>Skills:</strong> {req.skills}</div>
+                                                            <div><strong style={{ color: '#666' }}>Why:</strong> {req.reason}</div>
                                                         </div>
                                                     )}
                                                 </li>
@@ -526,70 +705,71 @@ END:VCALENDAR`;
                                 </div>
                             ) : (
                                 /* Create Team Section */
-                                <div style={{ border: '1px solid #555', padding: '20px', borderRadius: '10px' }}>
-                                    <h3>Create a Team</h3>
+                                <div style={{ border: '1px dashed #444', padding: '25px', borderRadius: '16px' }}>
+                                    <h3 style={{ marginTop: 0 }}>Create a Team</h3>
                                     <input
                                         placeholder="Team Name"
                                         value={teamName}
                                         onChange={e => setTeamName(e.target.value)}
-                                        style={{ width: '100%', padding: '10px', marginBottom: '10px' }}
+                                        style={{ width: '100%', padding: '15px', marginBottom: '15px', background: '#222', border: '1px solid #333', borderRadius: '12px', color: 'white', outline: 'none' }}
                                     />
                                     <textarea
                                         placeholder="Team Description"
                                         value={teamDesc}
                                         onChange={e => setTeamDesc(e.target.value)}
-                                        style={{ width: '100%', padding: '10px', marginBottom: '10px', minHeight: '60px' }}
+                                        style={{ width: '100%', padding: '15px', marginBottom: '15px', minHeight: '80px', background: '#222', border: '1px solid #333', borderRadius: '12px', color: 'white', outline: 'none', fontFamily: 'inherit' }}
                                     />
                                     <input
                                         placeholder="Profile Pic URL (Optional)"
                                         value={teamPic}
                                         onChange={e => setTeamPic(e.target.value)}
-                                        style={{ width: '100%', padding: '10px', marginBottom: '10px' }}
+                                        style={{ width: '100%', padding: '15px', marginBottom: '20px', background: '#222', border: '1px solid #333', borderRadius: '12px', color: 'white', outline: 'none' }}
                                     />
-                                    <button onClick={handleCreateTeamWrapped} style={{ width: '100%', padding: '10px', background: '#28a745', color: 'white', border: 'none', cursor: 'pointer' }}>
+                                    <button onClick={handleCreateTeamWrapped} style={{ width: '100%', padding: '15px', background: 'white', color: 'black', border: 'none', borderRadius: '12px', cursor: 'pointer', fontWeight: '900', fontSize: '1rem', textTransform: 'uppercase' }}>
                                         Create Team
                                     </button>
                                 </div>
                             )}
 
-                            {/* Join Team Section - Only show if not in a team (simplified) */}
+                            {/* Join Team Section */}
                             {!myTeam && (
-                                <div style={{ border: '1px solid #555', padding: '20px', borderRadius: '10px' }}>
-                                    <h3>Join a Team</h3>
+                                <div style={{ borderTop: '1px solid #333', paddingTop: '20px' }}>
+                                    <h3 style={{ margin: '0 0 15px 0', fontSize: '1.2rem', color: '#888' }}>or Join Existing Team</h3>
                                     {teams.length > 0 ? (
-                                        <ul style={{ listStyle: 'none', padding: 0, maxHeight: '150px', overflowY: 'auto', marginBottom: '10px' }}>
+                                        <ul style={{ listStyle: 'none', padding: 0, maxHeight: '200px', overflowY: 'auto', marginBottom: '20px' }}>
                                             {teams.map(t => (
-                                                <li key={t.id} style={{ padding: '10px', borderBottom: '1px solid #444', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                <li key={t.id} style={{ padding: '15px', background: '#1a1a1a', marginBottom: '10px', borderRadius: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                                     <div>
-                                                        <strong>{t.name}</strong>
-                                                        <div style={{ fontSize: '0.8rem', color: '#ccc' }}>{t.description}</div>
+                                                        <strong style={{ display: 'block', fontSize: '1.1rem' }}>{t.name}</strong>
+                                                        <span style={{ fontSize: '0.9rem', color: '#666' }}>{t.description}</span>
                                                     </div>
-                                                    <button onClick={() => openJoinForm(t)} style={{ padding: '5px 10px', fontSize: '0.8rem' }}>
-                                                        Req. Join
+                                                    <button onClick={() => openJoinForm(t)} style={{ padding: '8px 16px', background: 'rgba(255,255,255,0.1)', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer' }}>
+                                                        Join
                                                     </button>
                                                 </li>
                                             ))}
                                         </ul>
                                     ) : (
-                                        <p style={{ fontStyle: 'italic', color: '#888' }}>No teams available to join.</p>
+                                        <p style={{ fontStyle: 'italic', color: '#444', textAlign: 'center', margin: '20px 0' }}>No open teams found.</p>
                                     )}
 
                                     <div style={{ display: 'flex', gap: '10px' }}>
                                         <input
-                                            placeholder="Or enter Team ID manually"
+                                            placeholder="Enter Team ID manually"
                                             value={joinTeamId}
                                             onChange={e => setJoinTeamId(e.target.value)}
-                                            style={{ flex: 1, padding: '10px' }}
+                                            style={{ flex: 1, padding: '12px', background: '#222', border: '1px solid #333', borderRadius: '10px', color: 'white' }}
                                         />
-                                        <button onClick={() => handleJoinTeam(joinTeamId)} style={{ padding: '10px' }}>Send Request</button>
+                                        <button onClick={() => handleJoinTeam(joinTeamId)} style={{ padding: '12px 20px', background: '#333', color: 'white', border: '1px solid #444', borderRadius: '10px', cursor: 'pointer' }}>Search</button>
                                     </div>
                                 </div>
                             )}
                         </div>
-                        <button onClick={() => setShowMatchmaker(false)} style={{ marginTop: '20px', background: 'red', color: 'white', border: 'none', padding: '10px', cursor: 'pointer', width: '100%' }}>Close</button>
                     </div>
                 </div>
             )}
+
+            {/* KEEPING SUCCESS MODAL & JOIN FORM MODAL WITH UPDATED STYLING BELOW */}
             {/* SUCCESS / CALENDAR PROMPT MODAL */}
             {showSuccessModal && selectedEventId && (
                 <div style={{
@@ -598,109 +778,79 @@ END:VCALENDAR`;
                     display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 3000
                 }}>
                     <div style={{
-                        background: '#222', padding: '40px', borderRadius: '20px', textAlign: 'center',
-                        maxWidth: '500px', border: '1px solid #444', boxShadow: '0 0 30px rgba(0,255,100,0.2)'
+                        background: '#111', padding: '50px', borderRadius: '30px', textAlign: 'center',
+                        maxWidth: '500px', border: '1px solid #333', boxShadow: '0 0 50px rgba(188, 236, 21, 0.2)'
                     }}>
-                        <div style={{ fontSize: '3rem', marginBottom: '20px' }}>✅</div>
-                        <h2 style={{ color: '#4ade80', marginTop: 0 }}>You're In!</h2>
-                        <p>Team created successfully. Good luck!</p>
+                        <div style={{ fontSize: '4rem', marginBottom: '20px', color: '#bcec15' }}>✅</div>
+                        <h2 style={{ color: 'white', marginTop: 0, fontSize: '2rem' }}>YOU'RE IN!</h2>
+                        <p style={{ color: '#888' }}>Team created successfully. Good luck!</p>
 
-                        <div style={{ background: '#333', padding: '15px', borderRadius: '10px', margin: '20px 0', wordBreak: 'break-all', fontFamily: 'monospace' }}>
+                        <div style={{ background: '#222', padding: '20px', borderRadius: '15px', margin: '30px 0', wordBreak: 'break-all', fontFamily: 'monospace', color: '#bcec15', border: '1px dashed #444' }}>
                             {createdTeamLink}
                         </div>
-                        <p style={{ fontSize: '0.9rem', color: '#aaa' }}>Share this link with your teammates.</p>
-
-                        <div style={{ marginTop: '30px', borderTop: '1px solid #444', paddingTop: '20px' }}>
-                            <h3 style={{ fontSize: '1.2rem', margin: '0 0 15px 0' }}>🗓️ Set Your Reminders</h3>
-                            <p style={{ color: '#888', fontSize: '0.9rem', marginBottom: '20px' }}>
-                                Add this event to your calendar to get notified 2 days, 24h, 5h, and 1h before the event.
-                            </p>
-                            <div style={{ display: 'flex', gap: '15px', justifyContent: 'center' }}>
-                                {events.find(e => e.id === selectedEventId) && (
-                                    <>
-                                        <button
-                                            onClick={() => addToGoogleCalendar(events.find(e => e.id === selectedEventId)!)}
-                                            style={{
-                                                padding: '12px 20px', background: '#3b82f6', color: 'white', border: 'none',
-                                                borderRadius: '8px', cursor: 'pointer', fontWeight: 600
-                                            }}
-                                        >
-                                            Google Calendar
-                                        </button>
-                                        <button
-                                            onClick={() => downloadICS(events.find(e => e.id === selectedEventId)!)}
-                                            style={{
-                                                padding: '12px 20px', background: '#22c55e', color: 'white', border: 'none',
-                                                borderRadius: '8px', cursor: 'pointer', fontWeight: 600
-                                            }}
-                                        >
-                                            Download .ICS
-                                        </button>
-                                    </>
-                                )}
-                            </div>
-                        </div>
+                        <p style={{ fontSize: '0.9rem', color: '#666' }}>Share this link with your teammates.</p>
 
                         <button
                             onClick={() => setShowSuccessModal(false)}
                             style={{
-                                marginTop: '30px', background: 'transparent', color: '#888', border: 'none',
-                                cursor: 'pointer', textDecoration: 'underline'
+                                marginTop: '40px', background: 'white', color: 'black', border: 'none',
+                                cursor: 'pointer', padding: '15px 40px', borderRadius: '50px', fontWeight: 'bold'
                             }}
                         >
-                            Close & Continue
+                            CONTINUE
                         </button>
                     </div>
                 </div>
             )}
+
             {/* JOIN TEAM FORM MODAL */}
             {showTeamJoinForm && joiningTeamTarget && (
                 <div style={{
                     position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-                    backgroundColor: 'rgba(0,0,0,0.9)', color: 'white',
+                    backgroundColor: 'rgba(0,0,0,0.95)', color: 'white',
                     display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 3000
                 }}>
                     <div style={{
-                        background: '#222', padding: '30px', borderRadius: '15px',
-                        width: '90%', maxWidth: '500px', border: '1px solid #444'
+                        background: '#111', padding: '40px', borderRadius: '24px',
+                        width: '90%', maxWidth: '500px', border: '1px solid #333'
                     }}>
-                        <h3 style={{ marginTop: 0 }}>Join Request: {joiningTeamTarget.name}</h3>
-                        <p style={{ fontSize: '0.9rem', color: '#ccc' }}>Please tell the team leader why you'd be a good fit.</p>
+                        <h3 style={{ marginTop: 0, fontSize: '1.8rem' }}>Join <span style={{ color: '#bcec15' }}>{joiningTeamTarget.name}</span></h3>
+                        <p style={{ fontSize: '1rem', color: '#666', marginBottom: '30px' }}>Tell them why you're a good fit.</p>
 
-                        <label style={{ display: 'block', marginBottom: '5px', fontSize: '0.9rem' }}>Short Bio</label>
+                        <label style={{ display: 'block', marginBottom: '10px', fontSize: '0.9rem', fontWeight: 'bold', color: '#888' }}>SHORT BIO</label>
                         <input
                             value={joinTeamFormData.bio}
                             onChange={e => setJoinTeamFormData({ ...joinTeamFormData, bio: e.target.value })}
                             placeholder="I am a frontend dev..."
-                            style={{ width: '100%', padding: '8px', marginBottom: '15px', background: '#333', border: '1px solid #555', color: 'white' }}
+                            style={{ width: '100%', padding: '15px', marginBottom: '20px', background: '#222', border: '1px solid #333', borderRadius: '12px', color: 'white', outline: 'none' }}
                         />
 
-                        <label style={{ display: 'block', marginBottom: '5px', fontSize: '0.9rem' }}>Top Skills</label>
+                        <label style={{ display: 'block', marginBottom: '10px', fontSize: '0.9rem', fontWeight: 'bold', color: '#888' }}>TOP SKILLS</label>
                         <input
                             value={joinTeamFormData.skills}
                             onChange={e => setJoinTeamFormData({ ...joinTeamFormData, skills: e.target.value })}
                             placeholder="React, Python, Design..."
-                            style={{ width: '100%', padding: '8px', marginBottom: '15px', background: '#333', border: '1px solid #555', color: 'white' }}
+                            style={{ width: '100%', padding: '15px', marginBottom: '20px', background: '#222', border: '1px solid #333', borderRadius: '12px', color: 'white', outline: 'none' }}
                         />
 
-                        <label style={{ display: 'block', marginBottom: '5px', fontSize: '0.9rem' }}>Reason for joining</label>
+                        <label style={{ display: 'block', marginBottom: '10px', fontSize: '0.9rem', fontWeight: 'bold', color: '#888' }}>REASON FOR JOINING</label>
                         <textarea
                             value={joinTeamFormData.reason}
                             onChange={e => setJoinTeamFormData({ ...joinTeamFormData, reason: e.target.value })}
                             placeholder="I want to win because..."
-                            style={{ width: '100%', padding: '8px', marginBottom: '20px', minHeight: '80px', background: '#333', border: '1px solid #555', color: 'white' }}
+                            style={{ width: '100%', padding: '15px', marginBottom: '30px', minHeight: '100px', background: '#222', border: '1px solid #333', borderRadius: '12px', color: 'white', outline: 'none', fontFamily: 'inherit' }}
                         />
 
-                        <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                        <div style={{ display: 'flex', gap: '15px', justifyContent: 'flex-end' }}>
                             <button
                                 onClick={() => setShowTeamJoinForm(false)}
-                                style={{ background: 'transparent', color: '#aaa', border: 'none', cursor: 'pointer' }}
+                                style={{ background: 'transparent', color: '#888', border: 'none', cursor: 'pointer', padding: '10px 20px' }}
                             >
                                 Cancel
                             </button>
                             <button
                                 onClick={submitTeamJoinForm}
-                                style={{ background: '#3b82f6', color: 'white', padding: '10px 20px', borderRadius: '8px', border: 'none', cursor: 'pointer', fontWeight: 'bold' }}
+                                style={{ background: '#bcec15', color: 'black', padding: '15px 30px', borderRadius: '12px', border: 'none', cursor: 'pointer', fontWeight: 'bold' }}
                             >
                                 Send Request
                             </button>
@@ -708,7 +858,21 @@ END:VCALENDAR`;
                     </div>
                 </div>
             )}
+
+            {/* Global Styles for Animations */}
+            <style>{`
+                @keyframes pulse {
+                    0% { transform: scale(1); }
+                    50% { transform: scale(1.05); }
+                    100% { transform: scale(1); }
+                }
+                @keyframes spin {
+                    to { transform: rotate(360deg); }
+                }
+            `}</style>
         </div>
     );
 };
+
 export default Discover;
+
