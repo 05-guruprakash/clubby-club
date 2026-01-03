@@ -6,6 +6,7 @@ import { useAuth } from '../AuthContext';
 interface ChatRoomProps {
     communityId: string;
     type: 'club' | 'event' | 'team';
+    isDarkMode: boolean;
 }
 
 interface Comment {
@@ -28,7 +29,7 @@ interface Message {
     comments?: Comment[];
 }
 
-const ChatRoom: FC<ChatRoomProps> = ({ communityId, type }) => {
+const ChatRoom: FC<ChatRoomProps> = ({ communityId, type, isDarkMode }) => {
     const { user } = useAuth();
     const [messages, setMessages] = useState<Message[]>([]);
     const [newMessage, setNewMessage] = useState('');
@@ -433,40 +434,75 @@ const ChatRoom: FC<ChatRoomProps> = ({ communityId, type }) => {
     const canChatMain = type === 'team' || !isMember;
 
     return (
-        <div style={{ border: '1px solid #999', padding: '10px', margin: '10px 0', borderRadius: '8px', background: '#222', color: 'white' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ fontSize: '0.9rem' }}>
-                    You are: <span style={{ color: myColor }}>{myIcon} {userRoleInContext}</span>
+        <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            height: '100%',
+            background: 'transparent',
+            color: 'inherit'
+        }}>
+            {/* Context Info Bar */}
+            <div style={{
+                padding: '12px 32px',
+                background: isDarkMode ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                fontSize: '0.75rem',
+                fontWeight: '800',
+                letterSpacing: '1px',
+                borderBottom: isDarkMode ? '1px solid rgba(255,255,255,0.05)' : '1px solid rgba(0,0,0,0.05)'
+            }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ opacity: 0.5 }}>IDENTIFIED AS:</span>
+                    <span style={{ color: myColor || '#bcec15', textTransform: 'uppercase' }}>
+                        {myIcon} {userRoleInContext}
+                    </span>
                 </div>
+                {isServerAlive === false && type === 'club' && (
+                    <div style={{ color: '#ffb300', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#ffb300', animation: 'pulse 1.5s infinite' }}></span>
+                        LOCAL MODE (SERVER OFFLINE)
+                    </div>
+                )}
             </div>
 
-            {/* Backend Connection Warning */}
-            {isServerAlive === false && type === 'club' && (
-                <div style={{ background: '#fef3c7', color: '#92400e', padding: '8px', borderRadius: '4px', fontSize: '0.8rem', marginTop: '10px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    ⚠️ <strong>Server Offline:</strong> Experience may be slow. Please run <code>npm run dev</code> to start the full system.
-                </div>
-            )}
-
-            <div style={{ height: '500px', overflowY: 'auto', background: '#333', marginBottom: '10px', padding: '10px', borderRadius: '5px' }}>
+            {/* Messages Container */}
+            <div style={{
+                flex: 1,
+                minHeight: 0, // CRITICAL FOR EDGE/CHROME FLEX CONTAINERS
+                overflowY: 'auto',
+                padding: '30px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '24px',
+                scrollBehavior: 'smooth'
+            }}>
                 {messages.length === 0 ? (
-                    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#888', textAlign: 'center', padding: '20px' }}>
-                        <div style={{ fontSize: '3rem', marginBottom: '15px' }}>📭</div>
-                        <div style={{ fontSize: '1.1rem', marginBottom: '10px', color: '#aaa' }}>No messages yet.</div>
-                        <p style={{ fontSize: '0.85rem', marginBottom: '20px', maxWidth: '300px' }}>Be the first to start the conversation or seed some test data below.</p>
+                    <div style={{
+                        flex: 1,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        opacity: 0.2,
+                        textAlign: 'center'
+                    }}>
+                        <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                        </svg>
+                        <p style={{ marginTop: '20px', fontWeight: '900', fontSize: '1.2rem' }}>BEGIN THE CONVERSATION</p>
                         {(type === 'club' || type === 'event') && (
-                            <button
-                                onClick={fixAndSeed}
-                                style={{
-                                    padding: '12px 24px', borderRadius: '12px', background: 'linear-gradient(135deg, #646cff 0%, #4a51e6 100%)',
-                                    color: 'white', border: 'none', cursor: 'pointer', fontWeight: 'bold', boxShadow: '0 4px 12px rgba(100, 108, 255, 0.3)'
-                                }}
-                            >
-                                ✨ Seed Sample Test Data
+                            <button onClick={fixAndSeed} style={{
+                                marginTop: '20px', background: '#bcec15', color: 'black', border: 'none',
+                                padding: '12px 24px', borderRadius: '12px', fontWeight: '900', cursor: 'pointer'
+                            }}>
+                                SEED FEED
                             </button>
                         )}
                     </div>
                 ) : (
-                    messages.map(msg => {
+                    messages.map((msg) => {
                         const { color, icon } = getRoleData(msg.senderRole);
                         const isMe = msg.senderId === user?.uid;
                         const likedByMe = msg.likes?.includes(user?.uid || '');
@@ -482,189 +518,277 @@ const ChatRoom: FC<ChatRoomProps> = ({ communityId, type }) => {
                         }
 
                         return (
-                            <div key={msg.id} style={{ marginBottom: '15px', display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
-                                <div style={{ fontSize: '0.8rem', color: '#aaa', marginBottom: '2px' }}>
-                                    {msg.senderName} <span style={{ color: color !== 'transparent' ? color : 'inherit', fontWeight: 'bold' }}>({msg.senderRole || 'member'})</span> {icon} • {timeStr}
-                                </div>
+                            <div key={msg.id} style={{
+                                display: 'flex',
+                                flexDirection: 'column',
+                                alignItems: isMe ? 'flex-end' : 'flex-start',
+                                animation: 'messageSlide 0.4s cubic-bezier(0, 1, 0, 1)'
+                            }}>
+                                {/* Sender Info */}
                                 <div style={{
-                                    background: isMe ? '#4a4' : '#555',
-                                    padding: '8px 12px',
-                                    borderRadius: '15px',
-                                    display: 'inline-block',
-                                    maxWidth: '80%',
-                                    border: `2px solid ${color !== 'transparent' ? color : 'transparent'}`,
-                                    position: 'relative'
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '8px',
+                                    marginBottom: '6px',
+                                    fontSize: '0.75rem',
+                                    fontWeight: '700',
+                                    opacity: 0.6
+                                }}>
+                                    {!isMe && <span style={{ color: color !== 'transparent' ? color : '#bcec15' }}>{icon} {msg.senderName}</span>}
+                                    <span>{timeStr}</span>
+                                    {isMe && <span style={{ color: '#bcec15' }}>YOU</span>}
+                                </div>
+
+                                {/* Message Bubble */}
+                                <div style={{
+                                    background: isMe ? (isDarkMode ? 'white' : '#bcec15') : (isDarkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'),
+                                    color: isMe ? 'black' : 'inherit',
+                                    padding: '14px 22px',
+                                    borderRadius: isMe ? '24px 24px 4px 24px' : '24px 24px 24px 4px',
+                                    maxWidth: '85%',
+                                    position: 'relative',
+                                    fontWeight: '500',
+                                    lineHeight: '1.5',
+                                    boxShadow: isMe ? (isDarkMode ? '0 10px 20px rgba(255,255,255,0.1)' : '0 10px 20px rgba(0,0,0,0.1)') : 'none',
+                                    border: isDarkMode ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(0,0,0,0.1)'
                                 }}>
                                     {msg.text}
                                 </div>
 
-                                {/* Interactions: Like & Discuss (ONLY FOR CLUBS & EVENTS) */}
+                                {/* Interactions */}
                                 {(type === 'club' || type === 'event') && (
-                                    <>
-                                        <div style={{ display: 'flex', gap: '15px', marginTop: '5px', fontSize: '0.8rem', color: '#ccc', marginLeft: isMe ? '0' : '10px', marginRight: isMe ? '10px' : '0' }}>
-                                            <span
-                                                onClick={() => handleLike(msg)}
-                                                style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', color: likedByMe ? '#ff4444' : 'inherit' }}
-                                                title="Like"
-                                            >
-                                                {likedByMe ? '❤️' : '🤍'} {msg.likes?.length || 0}
-                                            </span>
-                                            <span
-                                                onClick={() => toggleComments(msg.id)}
-                                                style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
-                                                title="Discuss"
-                                            >
-                                                💬 {commentCount} Discuss
-                                            </span>
+                                    <div style={{
+                                        display: 'flex',
+                                        gap: '16px',
+                                        marginTop: '8px',
+                                        fontSize: '0.75rem',
+                                        fontWeight: '800'
+                                    }}>
+                                        <button
+                                            onClick={() => handleLike(msg)}
+                                            style={{
+                                                background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                                                color: likedByMe ? '#ff4444' : 'inherit', opacity: likedByMe ? 1 : 0.4,
+                                                display: 'flex', alignItems: 'center', gap: '5px', transition: '0.2s'
+                                            }}
+                                        >
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill={likedByMe ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2.5">
+                                                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+                                            </svg>
+                                            {msg.likes?.length || 0}
+                                        </button>
+
+                                        <button
+                                            onClick={() => toggleComments(msg.id)}
+                                            style={{
+                                                background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                                                color: isExpanded ? '#bcec15' : 'inherit', opacity: isExpanded ? 1 : 0.4,
+                                                display: 'flex', alignItems: 'center', gap: '5px', transition: '0.2s'
+                                            }}
+                                        >
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                                <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+                                            </svg>
+                                            {commentCount}
+                                        </button>
+                                    </div>
+                                )}
+
+                                {/* Collapsible Discussion */}
+                                {isExpanded && (
+                                    <div style={{
+                                        marginTop: '15px',
+                                        width: '90%',
+                                        background: isDarkMode ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)',
+                                        borderRadius: '20px',
+                                        padding: '20px',
+                                        border: isDarkMode ? '1px solid rgba(255,255,255,0.05)' : '1px solid rgba(0,0,0,0.05)',
+                                        animation: 'fadeIn 0.3s'
+                                    }}>
+                                        <div style={{ fontSize: '0.7rem', fontWeight: '900', opacity: 0.4, marginBottom: '15px', letterSpacing: '1px' }}>THREAD</div>
+
+                                        <div style={{ maxHeight: '200px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '15px', marginBottom: '15px' }}>
+                                            {msg.comments && msg.comments.length > 0 ? msg.comments.map((comment, idx) => (
+                                                <div key={idx} style={{ paddingLeft: '12px', borderLeft: '2px solid rgba(255,255,255,0.1)' }}>
+                                                    <div style={{ fontSize: '0.7rem', fontWeight: '800', marginBottom: '4px' }}>
+                                                        <span
+                                                            onClick={() => comment.senderId && showUserCard(comment.senderId)}
+                                                            style={{ cursor: 'pointer', color: '#bcec15' }}
+                                                        >
+                                                            {comment.senderName.toUpperCase()}
+                                                        </span>
+                                                        <span style={{ opacity: 0.3, marginLeft: '8px' }}>
+                                                            {new Date(comment.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                        </span>
+                                                    </div>
+                                                    <div style={{ fontSize: '0.85rem', opacity: 0.8 }}>{comment.text}</div>
+                                                </div>
+                                            )) : (
+                                                <div style={{ fontSize: '0.8rem', opacity: 0.3, fontStyle: 'italic' }}>No discussion yet.</div>
+                                            )}
                                         </div>
 
-                                        {/* Collapsible Comments Section */}
-                                        {isExpanded && (
-                                            <div style={{
-                                                marginTop: '8px',
-                                                background: '#2a2a2a',
-                                                padding: '10px',
-                                                borderRadius: '8px',
-                                                width: '80%',
-                                                alignSelf: isMe ? 'flex-end' : 'flex-start',
-                                                borderLeft: '3px solid #ffaa00'
-                                            }}>
-                                                {/* Discussion Thread */}
-                                                <div style={{ fontSize: '0.8rem', color: '#ffaa00', marginBottom: '8px', fontWeight: 'bold' }}>Discussion</div>
-                                                {msg.comments && msg.comments.length > 0 ? (
-                                                    <div style={{ marginBottom: '10px', maxHeight: '200px', overflowY: 'auto' }}>
-                                                        {msg.comments.map((comment, idx) => (
-                                                            <div key={idx} style={{ marginBottom: '8px', borderBottom: '1px solid #444', paddingBottom: '4px' }}>
-                                                                <div style={{ fontSize: '0.75rem', color: '#aaa', marginBottom: '2px' }}>
-                                                                    <span
-                                                                        style={{ fontWeight: 'bold', color: '#ddd', cursor: 'pointer', textDecoration: 'underline' }}
-                                                                        onClick={() => comment.senderId && showUserCard(comment.senderId)}
-                                                                    >
-                                                                        {comment.senderName}
-                                                                    </span> • {new Date(comment.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                                                </div>
-                                                                <div style={{ fontSize: '0.9rem', color: 'white' }}>
-                                                                    {comment.text}
-                                                                </div>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                ) : (
-                                                    <div style={{ fontSize: '0.8rem', color: '#777', marginBottom: '10px', fontStyle: 'italic' }}>
-                                                        Start the discussion...
-                                                    </div>
-                                                )}
-
-                                                {/* Add Comment Input */}
-                                                <div style={{ display: 'flex', gap: '5px' }}>
-                                                    <input
-                                                        type="text"
-                                                        value={commentInputText[msg.id] || ''}
-                                                        onChange={e => handleInputChange(msg.id, e.target.value)}
-                                                        placeholder="Type your discussion..."
-                                                        style={{
-                                                            flex: 1, padding: '6px', borderRadius: '4px', border: '1px solid #555',
-                                                            background: '#333', color: 'white', fontSize: '0.85rem'
-                                                        }}
-                                                        onKeyDown={e => e.key === 'Enter' && submitComment(msg.id)}
-                                                    />
-                                                    <button
-                                                        onClick={() => submitComment(msg.id)}
-                                                        style={{
-                                                            padding: '4px 10px', fontSize: '0.8rem', background: '#3b82f6',
-                                                            color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer'
-                                                        }}
-                                                    >
-                                                        Post
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        )}
-                                    </>
+                                        <div style={{ display: 'flex', gap: '8px' }}>
+                                            <input
+                                                placeholder="Contribute to discussion..."
+                                                value={commentInputText[msg.id] || ''}
+                                                onChange={e => handleInputChange(msg.id, e.target.value)}
+                                                onKeyDown={e => e.key === 'Enter' && submitComment(msg.id)}
+                                                style={{
+                                                    flex: 1, background: isDarkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)', border: 'none',
+                                                    padding: '10px 16px', borderRadius: '12px', color: 'inherit', fontSize: '0.8rem'
+                                                }}
+                                            />
+                                            <button
+                                                onClick={() => submitComment(msg.id)}
+                                                style={{
+                                                    background: '#bcec15', color: 'black', border: 'none',
+                                                    padding: '0 16px', borderRadius: '12px', fontWeight: '900',
+                                                    fontSize: '0.7rem', cursor: 'pointer'
+                                                }}
+                                            >
+                                                POST
+                                            </button>
+                                        </div>
+                                    </div>
                                 )}
                             </div>
                         );
-                    }))}
+                    })
+                )}
             </div>
 
-            {canChatMain ? (
-                <div style={{ display: 'flex', gap: '10px' }}>
-                    <input
-                        value={newMessage}
-                        onChange={e => setNewMessage(e.target.value)}
-                        placeholder="Type a message..."
-                        style={{ flex: 1, padding: '10px', borderRadius: '5px', border: 'none' }}
-                        onKeyDown={e => e.key === 'Enter' && handleSendMessage()}
-                    />
-                    <button onClick={handleSendMessage} style={{ padding: '10px 20px', background: '#007bff', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer' }}>
-                        Send
-                    </button>
-                </div>
-            ) : (
-                <div style={{ padding: '12px', background: '#333', textAlign: 'center', borderRadius: '5px', color: '#aaa', fontSize: '0.9rem' }}>
-                    Read Only. You can like messages and participate in comment threads.
-                </div>
-            )}
-
-            {/* Temporary Debug Button - can be removed once verified */}
-            <div style={{ marginTop: '20px', borderTop: '1px dashed #666', paddingTop: '10px', textAlign: 'center' }}>
-                <button
-                    onClick={fixAndSeed}
-                    style={{ fontSize: '0.7rem', opacity: 0.5, background: 'none', color: '#888', border: '1px solid #444', cursor: 'pointer', padding: '2px 5px' }}
-                >
-                    DEBUG: Click if Like/Comment fails
-                </button>
-                {/* User Profile Modal */}
-                {selectedUserProfile && (
+            {/* Input Area */}
+            <div style={{
+                padding: '20px 32px',
+                borderTop: isDarkMode ? '1px solid rgba(255,255,255,0.05)' : '1px solid rgba(0,0,0,0.05)',
+                background: isDarkMode ? 'rgba(0,0,0,0.1)' : 'rgba(0,0,0,0.02)',
+                backdropFilter: 'blur(20px)',
+                flexShrink: 0
+            }}>
+                {canChatMain ? (
+                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                        <input
+                            value={newMessage}
+                            onChange={e => setNewMessage(e.target.value)}
+                            placeholder="Share something with the community..."
+                            onKeyDown={e => e.key === 'Enter' && handleSendMessage()}
+                            style={{
+                                flex: 1,
+                                padding: '18px 24px',
+                                paddingRight: '120px',
+                                borderRadius: '16px',
+                                border: isDarkMode ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.1)',
+                                background: isDarkMode ? 'rgba(255,255,255,0.03)' : 'white',
+                                color: 'inherit',
+                                fontSize: '1rem',
+                                outline: 'none',
+                                transition: 'all 0.3s',
+                                boxShadow: isDarkMode ? 'none' : '0 2px 10px rgba(0,0,0,0.05)'
+                            }}
+                            className="chat-input"
+                        />
+                        <button
+                            onClick={handleSendMessage}
+                            style={{
+                                position: 'absolute',
+                                right: '8px',
+                                background: '#bcec15',
+                                color: 'black',
+                                border: 'none',
+                                padding: '10px 24px',
+                                borderRadius: '12px',
+                                fontWeight: '900',
+                                letterSpacing: '0.5px',
+                                cursor: 'pointer',
+                                transition: 'all 0.2s'
+                            }}
+                            onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.05)'}
+                            onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
+                        >
+                            SEND
+                        </button>
+                    </div>
+                ) : (
                     <div style={{
-                        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-                        backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 3000,
-                        backdropFilter: 'blur(5px)'
+                        textAlign: 'center',
+                        padding: '16px',
+                        background: 'rgba(255,255,255,0.02)',
+                        borderRadius: '16px',
+                        fontSize: '0.8rem',
+                        fontWeight: '700',
+                        opacity: 0.4
                     }}>
-                        <div style={{
-                            background: '#1e1e1e', padding: '30px', borderRadius: '15px', width: '90%', maxWidth: '350px',
-                            boxShadow: '0 10px 30px rgba(0,0,0,0.5)', border: '1px solid #444', color: 'white'
-                        }}>
-                            <div style={{ textAlign: 'center', marginBottom: '20px' }}>
-                                <div style={{
-                                    width: '70px', height: '70px', borderRadius: '50%', background: '#3b82f6',
-                                    margin: '0 auto 10px', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                    fontSize: '1.5rem', fontWeight: 'bold'
-                                }}>
-                                    {selectedUserProfile.username?.[0].toUpperCase() || 'U'}
-                                </div>
-                                <h3 style={{ margin: 0 }}>{selectedUserProfile.username || 'User'}</h3>
-                                <div style={{ fontSize: '0.8rem', color: '#aaa' }}>{selectedUserProfile.role || 'Member'}</div>
-                            </div>
-                            <div style={{ display: 'grid', gap: '12px', fontSize: '0.9rem' }}>
-                                <div style={{ background: '#2a2a2a', padding: '10px', borderRadius: '8px' }}>
-                                    <div style={{ color: '#888', fontSize: '0.7rem', fontWeight: 'bold' }}>FULL NAME</div>
-                                    <div>{selectedUserProfile.firstName} {selectedUserProfile.lastName}</div>
-                                </div>
-                                <div style={{ background: '#2a2a2a', padding: '10px', borderRadius: '8px' }}>
-                                    <div style={{ color: '#888', fontSize: '0.7rem', fontWeight: 'bold' }}>REGISTRATION NO</div>
-                                    <div>{selectedUserProfile.regNo || 'N/A'}</div>
-                                </div>
-                                <div style={{ background: '#2a2a2a', padding: '10px', borderRadius: '8px' }}>
-                                    <div style={{ color: '#888', fontSize: '0.7rem', fontWeight: 'bold' }}>OFFICIAL EMAIL</div>
-                                    <div>{selectedUserProfile.officialMail || selectedUserProfile.email}</div>
-                                </div>
-                            </div>
-                            <button
-                                onClick={() => setSelectedUserProfile(null)}
-                                style={{
-                                    marginTop: '20px', width: '100%', padding: '10px', borderRadius: '8px',
-                                    background: '#ef4444', color: 'white', border: 'none', cursor: 'pointer', fontWeight: 'bold'
-                                }}
-                            >
-                                Close
-                            </button>
-                        </div>
+                        YOU ARE IN READ-ONLY MODE. PARTICIPATE VIA DISCUSSIONS.
                     </div>
                 )}
             </div>
+
+            {/* User Profile Modal */}
+            {selectedUserProfile && (
+                <div style={{
+                    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                    backgroundColor: 'rgba(0,0,0,0.9)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 3000,
+                    backdropFilter: 'blur(15px)'
+                }}>
+                    <div style={{
+                        background: '#050505', padding: '40px', borderRadius: '32px', width: '90%', maxWidth: '400px',
+                        boxShadow: '0 0 50px rgba(188, 236, 21, 0.2)', border: '1px solid #333', color: 'white',
+                        animation: 'zoomIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275)'
+                    }}>
+                        <div style={{ textAlign: 'center', marginBottom: '30px' }}>
+                            <div style={{
+                                width: '100px', height: '100px', borderRadius: '24px', background: '#bcec15',
+                                margin: '0 auto 20px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                fontSize: '2.5rem', fontWeight: '900', color: 'black',
+                                boxShadow: '0 10px 30px rgba(188, 236, 21, 0.3)'
+                            }}>
+                                {selectedUserProfile.username?.[0].toUpperCase() || 'U'}
+                            </div>
+                            <h3 style={{ margin: 0, fontSize: '1.8rem', fontWeight: '900' }}>{selectedUserProfile.username}</h3>
+                            <div style={{ fontSize: '0.9rem', color: '#bcec15', fontWeight: '800', letterSpacing: '1px', marginTop: '5px' }}>
+                                {selectedUserProfile.role?.toUpperCase() || 'MEMBER'}
+                            </div>
+                        </div>
+
+                        <div style={{ display: 'grid', gap: '15px' }}>
+                            {[
+                                { label: 'NAME', val: `${selectedUserProfile.firstName} ${selectedUserProfile.lastName}` },
+                                { label: 'ID', val: selectedUserProfile.regNo || 'N/A' },
+                                { label: 'EMAIL', val: selectedUserProfile.officialMail || selectedUserProfile.email }
+                            ].map((item, i) => (
+                                <div key={i} style={{ background: isDarkMode ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)', padding: '16px', borderRadius: '16px', border: isDarkMode ? '1px solid rgba(255,255,255,0.05)' : '1px solid rgba(0,0,0,0.05)' }}>
+                                    <div style={{ color: '#666', fontSize: '0.65rem', fontWeight: '900', marginBottom: '4px', letterSpacing: '1px' }}>{item.label}</div>
+                                    <div style={{ fontWeight: '600' }}>{item.val}</div>
+                                </div>
+                            ))}
+                        </div>
+
+                        <button
+                            onClick={() => setSelectedUserProfile(null)}
+                            style={{
+                                marginTop: '30px', width: '100%', padding: '16px', borderRadius: '16px',
+                                background: 'white', color: 'black', border: 'none', cursor: 'pointer',
+                                fontWeight: '900', fontSize: '0.9rem', transition: '0.2s'
+                            }}
+                            onMouseEnter={e => e.currentTarget.style.background = '#bcec15'}
+                            onMouseLeave={e => e.currentTarget.style.background = 'white'}
+                        >
+                            CLOSE PROFILE
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            <style>{`
+                @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+                @keyframes messageSlide { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+                @keyframes zoomIn { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
+                .chat-input:focus { border-color: #bcec15 !important; box-shadow: 0 0 20px rgba(188, 236, 21, 0.1); }
+            `}</style>
         </div>
     );
 };
 
 export default ChatRoom;
+

@@ -97,12 +97,12 @@ const AuthShell: React.FC<AuthShellProps> = ({ isDarkMode, toggleTheme }) => {
             <div style={overlayStyle}>
                 <div style={{ width: '100%', maxWidth: '380px' }}>
                     <h1 style={{ fontSize: '3.5rem', fontWeight: '900', marginBottom: '20px', letterSpacing: '-1.5px', lineHeight: '1.1' }}>
-                        {isSignUp ? "WELCOME BACK ->" : "<- SIGN IN"}
+                        {isSignUp ? "ALREADY JOINED?" : "NEW HERE?"}
                     </h1>
                     <p style={{ marginBottom: '40px', fontSize: '1.2rem', opacity: 0.8, fontWeight: '600', lineHeight: '1.5' }}>
                         {isSignUp
-                            ? "To keep connected with us please login with your personal info."
-                            : "Enter your personal details and start your journey with us."}
+                            ? "If you already have an account, just sign in. We've missed you!"
+                            : "Join our community today and start your journey with us."}
                     </p>
                     <button
                         onClick={toggle}

@@ -18,7 +18,7 @@ interface TeamMember {
     role?: string;
 }
 
-const Feed = () => {
+const Feed = ({ isDarkMode }: { isDarkMode: boolean }) => {
     const { user } = useAuth();
     const [tab, setTab] = useState<'events' | 'team' | 'club'>('events');
     const [myTeams, setMyTeams] = useState<Team[]>([]);
@@ -192,280 +192,341 @@ const Feed = () => {
 
 
     return (
-        <div style={{ maxWidth: '1400px', margin: '0 auto', color: 'white' }}>
-            {/* Main Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' }}>
-                <h1 style={{
-                    margin: 0,
-                    fontSize: '2.5rem',
-                    fontWeight: 900,
-                    background: 'linear-gradient(135deg, #fff 0%, #aaa 100%)',
-                    WebkitBackgroundClip: 'text',
-                    WebkitTextFillColor: 'transparent'
-                }}>
-                    Community Feed
-                </h1>
-            </div>
+        <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '20px', minHeight: '90vh' }}>
+            {/* Header Section */}
+            <div style={{ marginBottom: '40px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+                <div>
+                    <h1 style={{
+                        margin: 0,
+                        fontSize: '3rem',
+                        fontWeight: '900',
+                        letterSpacing: '-2px',
+                        lineHeight: '1',
+                        color: 'inherit'
+                    }}>
+                        FEED<span style={{ color: '#bcec15' }}>.</span>
+                    </h1>
+                    <p style={{ margin: '10px 0 0 0', opacity: 0.5, fontWeight: '500', fontSize: '1.1rem' }}>
+                        Stay synced with your teams and community.
+                    </p>
+                </div>
 
-            {/* Main Navigation Tabs */}
-            <div style={{
-                display: 'flex',
-                gap: '10px',
-                marginBottom: '30px',
-                padding: '10px',
-                background: 'rgba(255,255,255,0.03)',
-                borderRadius: '20px',
-                border: '1px solid rgba(255,255,255,0.05)',
-                backdropFilter: 'blur(10px)',
-                width: 'fit-content'
-            }}>
-                {[
-                    { id: 'events', label: 'Events (Official)', icon: '🎪' },
-                    { id: 'team', label: 'My Teams', icon: '👥' },
-                    { id: 'club', label: 'Club Community', icon: '🏢' }
-                ].map((t) => (
-                    <button
-                        key={t.id}
-                        onClick={() => setTab(t.id as any)}
-                        style={{
-                            padding: '12px 24px',
-                            borderRadius: '14px',
-                            border: 'none',
-                            cursor: 'pointer',
-                            fontWeight: 700,
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '8px',
-                            transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
-                            background: tab === t.id ? 'linear-gradient(135deg, #646cff 0%, #4a51e6 100%)' : 'transparent',
-                            color: tab === t.id ? 'white' : '#888',
-                            boxShadow: tab === t.id ? '0 10px 20px rgba(100, 108, 255, 0.4)' : 'none',
-                            transform: tab === t.id ? 'translateY(-2px)' : 'none'
-                        }}
-                    >
-                        <span>{t.icon}</span>
-                        {t.label}
-                    </button>
-                ))}
-            </div>
-
-            {tab === 'team' ? (
+                {/* Minimalist Tab Switcher */}
                 <div style={{
                     display: 'flex',
-                    height: '82vh',
-                    background: '#121212',
-                    borderRadius: '24px',
-                    padding: '25px',
-                    boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
-                    border: '1px solid rgba(255,255,255,0.05)',
-                    overflow: 'hidden'
+                    background: 'rgba(255,255,255,0.03)',
+                    padding: '6px',
+                    borderRadius: '16px',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    backdropFilter: 'blur(10px)'
                 }}>
-                    {/* Left: Chat */}
-                    <div style={{ flex: 3, borderRight: '1px solid #444', paddingRight: '20px', display: 'flex', flexDirection: 'column' }}>
-                        <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', overflowX: 'auto', paddingBottom: '10px' }}>
-                            {myTeams.map(team => (
-                                <button key={team.id} onClick={() => setSelectedTeamId(team.id)}
-                                    style={{ background: selectedTeamId === team.id ? '#007bff' : '#333', color: 'white', padding: '10px', borderRadius: '5px', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                                    {team.name}
-                                </button>
-                            ))}
-                        </div>
-                        {selectedTeamId ? (
-                            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                                <h3 style={{ marginTop: 0, color: '#aaa' }}>{currentEventName}</h3>
-                                <ChatRoom communityId={selectedTeamId} type="team" />
-                            </div>
-                        ) : <p style={{ color: '#888' }}>Select a team to start chatting.</p>}
-                    </div>
+                    {[
+                        {
+                            id: 'events', label: 'OFFICIAL', icon: (
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" /><line x1="4" y1="22" x2="4" y2="15" />
+                                </svg>
+                            )
+                        },
+                        {
+                            id: 'team', label: 'MY TEAMS', icon: (
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                                </svg>
+                            )
+                        },
+                        {
+                            id: 'club', label: 'COMMUNITY', icon: (
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><line x1="3" y1="9" x2="21" y2="9" /><line x1="9" y1="21" x2="9" y2="9" />
+                                </svg>
+                            )
+                        }
+                    ].map(t => (
+                        <button
+                            key={t.id}
+                            onClick={() => setTab(t.id as any)}
+                            style={{
+                                padding: '10px 20px',
+                                borderRadius: '12px',
+                                border: 'none',
+                                cursor: 'pointer',
+                                fontSize: '0.75rem',
+                                fontWeight: '900',
+                                letterSpacing: '1px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '8px',
+                                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                                background: tab === t.id ? '#bcec15' : 'transparent',
+                                color: tab === t.id ? 'black' : 'inherit',
+                                opacity: tab === t.id ? 1 : 0.5,
+                                transform: tab === t.id ? 'scale(1.05)' : 'scale(1)'
+                            }}
+                        >
+                            {t.icon}
+                            {t.label}
+                        </button>
+                    ))}
+                </div>
+            </div>
 
-                    {/* Right: Sidebar */}
-                    <div style={{ flex: 1, paddingLeft: '20px', overflowY: 'auto' }}>
-                        <h3 style={{ color: 'white' }}>Team Members</h3>
-                        <ul style={{ listStyle: 'none', padding: 0 }}>
-                            {teamMembers.map(m => (
-                                <li key={m.uid} style={{ padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#ccc' }}>
-                                    <span>{m.name} <span style={{ fontSize: '0.75rem', color: '#666' }}>({m.role})</span></span>
-                                    {(myTeams.find(t => t.id === selectedTeamId)?.leaderId || (myTeams.find(t => t.id === selectedTeamId) as any)?.leader_id) === user?.uid && m.uid !== user?.uid && (
-                                        <button onClick={() => handleRemoveMember(m.uid)} style={{ color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8rem' }}>Remove</button>
-                                    )}
-                                </li>
-                            ))}
-                        </ul>
-                        {(myTeams.find(t => t.id === selectedTeamId)?.leaderId || (myTeams.find(t => t.id === selectedTeamId) as any)?.leader_id) === user?.uid && (
-                            <button onClick={handleDeleteTeam} style={{ marginTop: '20px', background: '#450a0a', color: '#f87171', border: '1px solid #7f1d1d', padding: '10px', width: '100%', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}>
-                                Delete Team
-                            </button>
+            {/* TAB CONTENT: MY TEAMS */}
+            {tab === 'team' && (
+                <div style={{ display: 'grid', gridTemplateColumns: '350px 1fr', gap: '30px', height: 'calc(100vh - 280px)', minHeight: '600px' }}>
+                    {/* Left Panel: Team List & Info */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                        <div style={{
+                            background: isDarkMode ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)',
+                            borderRadius: '24px',
+                            padding: '24px',
+                            border: isDarkMode ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(0,0,0,0.08)',
+                            flex: 1,
+                            overflow: 'hidden',
+                            display: 'flex',
+                            flexDirection: 'column'
+                        }}>
+                            <h3 style={{ margin: '0 0 20px 0', fontSize: '1.2rem', fontWeight: '800', letterSpacing: '-0.5px' }}>YOUR TEAMS</h3>
+                            <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                {myTeams.length > 0 ? myTeams.map(team => (
+                                    <button
+                                        key={team.id}
+                                        onClick={() => setSelectedTeamId(team.id)}
+                                        style={{
+                                            padding: '16px',
+                                            borderRadius: '16px',
+                                            border: '1px solid',
+                                            borderColor: selectedTeamId === team.id ? '#bcec15' : (isDarkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'),
+                                            background: selectedTeamId === team.id ? 'rgba(188, 236, 21, 0.1)' : (isDarkMode ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.02)'),
+                                            color: selectedTeamId === team.id ? '#bcec15' : 'inherit',
+                                            textAlign: 'left',
+                                            cursor: 'pointer',
+                                            transition: 'all 0.2s',
+                                            display: 'flex',
+                                            justifyContent: 'space-between',
+                                            alignItems: 'center'
+                                        }}
+                                    >
+                                        <span style={{ fontWeight: '700' }}>{team.name}</span>
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                                            <path d="M5 12h14M12 5l7 7-7 7" />
+                                        </svg>
+                                    </button>
+                                )) : (
+                                    <p style={{ opacity: 0.4, textAlign: 'center', marginTop: '40px' }}>No teams found.</p>
+                                )}
+                            </div>
+                        </div>
+
+                        {selectedTeamId && (
+                            <div style={{
+                                background: isDarkMode ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)',
+                                borderRadius: '24px',
+                                padding: '24px',
+                                border: isDarkMode ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(0,0,0,0.08)'
+                            }}>
+                                <h3 style={{ margin: '0 0 15px 0', fontSize: '1rem', fontWeight: '800', opacity: 0.7 }}>MEMBERS</h3>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                    {teamMembers.map(m => (
+                                        <div key={m.uid} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                                <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: m.role === 'Leader' ? '#bcec15' : '#444' }}></div>
+                                                <span style={{ fontSize: '0.9rem', fontWeight: '600' }}>{m.name}</span>
+                                            </div>
+                                            {(myTeams.find(t => t.id === selectedTeamId)?.leaderId || (myTeams.find(t => t.id === selectedTeamId) as any)?.leader_id) === user?.uid && m.uid !== user?.uid && (
+                                                <button
+                                                    onClick={() => handleRemoveMember(m.uid)}
+                                                    style={{ background: 'none', border: 'none', color: '#ff4444', cursor: 'pointer', fontSize: '0.7rem', fontWeight: 'bold' }}
+                                                >
+                                                    REMOVE
+                                                </button>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+
+                                {(myTeams.find(t => t.id === selectedTeamId)?.leaderId || (myTeams.find(t => t.id === selectedTeamId) as any)?.leader_id) === user?.uid && (
+                                    <button
+                                        onClick={handleDeleteTeam}
+                                        style={{
+                                            marginTop: '30px',
+                                            width: '100%',
+                                            padding: '12px',
+                                            borderRadius: '12px',
+                                            background: isDarkMode ? 'rgba(255,68,68,0.1)' : 'rgba(255,68,68,0.05)',
+                                            color: '#ff4444',
+                                            border: isDarkMode ? '1px solid rgba(255,68,68,0.2)' : '1px solid rgba(255,68,68,0.3)',
+                                            fontWeight: 'bold',
+                                            cursor: 'pointer',
+                                            fontSize: '0.8rem',
+                                            transition: 'all 0.2s'
+                                        }}
+                                    >
+                                        DISBAND TEAM
+                                    </button>
+                                )}
+                            </div>
                         )}
                     </div>
-                </div>
-            ) : tab === 'events' ? (
-                <div style={{
-                    height: '82vh',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    background: '#121212',
-                    borderRadius: '24px',
-                    padding: '25px',
-                    boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
-                    border: '1px solid rgba(255,255,255,0.05)',
-                    overflow: 'hidden',
-                    position: 'relative'
-                }}>
-                    {/* Premium Header with Glassmorphism Navigation */}
-                    <div style={{
-                        marginBottom: '25px',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '15px'
-                    }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <h2 style={{
-                                margin: 0,
-                                fontSize: '2rem',
-                                fontWeight: 800,
-                                background: 'linear-gradient(to right, #646cff, #9f7aea)',
-                                WebkitBackgroundClip: 'text',
-                                WebkitTextFillColor: 'transparent'
-                            }}>
-                                Event Hub
-                            </h2>
-                            {selectedEventTab === 'all' && (
-                                <button
-                                    onClick={() => alert("To seed messages, click the 'DEBUG: Fix & Seed' button at the bottom of the chat room if it appears empty!")}
-                                    style={{
-                                        background: 'rgba(255,255,255,0.05)',
-                                        border: '1px solid rgba(255,255,255,0.1)',
-                                        color: '#aaa',
-                                        padding: '5px 12px',
-                                        borderRadius: '12px',
-                                        fontSize: '0.75rem',
-                                        cursor: 'pointer'
-                                    }}
-                                >
-                                    💡 Need Test Data?
-                                </button>
-                            )}
-                        </div>
-
-                        <div style={{
-                            display: 'flex',
-                            gap: '12px',
-                            overflowX: 'auto',
-                            padding: '8px',
-                            background: 'rgba(255,255,255,0.03)',
-                            borderRadius: '16px',
-                            backdropFilter: 'blur(10px)',
-                            border: '1px solid rgba(255,255,255,0.05)'
-                        }}>
-                            <button
-                                onClick={() => setSelectedEventTab('all')}
-                                style={{
-                                    padding: '10px 20px',
-                                    borderRadius: '12px',
-                                    border: 'none',
-                                    cursor: 'pointer',
-                                    fontWeight: 700,
-                                    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                                    background: selectedEventTab === 'all' ? 'linear-gradient(135deg, #646cff 0%, #4a51e6 100%)' : 'rgba(255,255,255,0.05)',
-                                    color: 'white',
-                                    boxShadow: selectedEventTab === 'all' ? '0 8px 15px rgba(100, 108, 255, 0.3)' : 'none',
-                                    transform: selectedEventTab === 'all' ? 'translateY(-2px)' : 'none',
-                                    minWidth: '120px'
-                                }}
-                            >
-                                🌎 Global Feed
-                            </button>
-                            {joinedEvents.map(ev => (
-                                <button
-                                    key={ev.id}
-                                    onClick={() => setSelectedEventTab(ev.id)}
-                                    style={{
-                                        padding: '10px 22px',
-                                        borderRadius: '12px',
-                                        border: 'none',
-                                        cursor: 'pointer',
-                                        fontWeight: 700,
-                                        transition: 'all 0.3s ease',
-                                        background: selectedEventTab === ev.id ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : 'rgba(255,255,255,0.05)',
-                                        color: 'white',
-                                        boxShadow: selectedEventTab === ev.id ? '0 8px 15px rgba(16, 185, 129, 0.2)' : 'none',
-                                        transform: selectedEventTab === ev.id ? 'translateY(-2px)' : 'none',
-                                        whiteSpace: 'nowrap'
-                                    }}
-                                >
-                                    🎯 {ev.title}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
 
                     <div style={{
-                        flex: 1,
+                        background: isDarkMode ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.02)',
+                        borderRadius: '32px',
+                        border: isDarkMode ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(0,0,0,0.08)',
                         display: 'flex',
                         flexDirection: 'column',
                         overflow: 'hidden',
-                        borderRadius: '20px',
-                        background: 'rgba(0,0,0,0.2)',
-                        border: '1px solid rgba(255,255,255,0.03)'
+                        height: '100%'
                     }}>
+                        {selectedTeamId ? (
+                            <>
+                                <div style={{ padding: '24px 32px', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <div>
+                                        <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: '900', letterSpacing: '-0.5px' }}>{myTeams.find(t => t.id === selectedTeamId)?.name}</h2>
+                                        <p style={{ margin: '4px 0 0 0', opacity: 0.4, fontSize: '0.85rem', fontWeight: '600' }}>EVENT: {currentEventName.toUpperCase()}</p>
+                                    </div>
+                                    <div style={{ padding: '8px 16px', background: 'rgba(188, 236, 21, 0.1)', color: '#bcec15', borderRadius: '50px', fontSize: '0.75rem', fontWeight: '900' }}>
+                                        ACTIVE CHAT
+                                    </div>
+                                </div>
+                                <div style={{ flex: 1, position: 'relative' }}>
+                                    <ChatRoom communityId={selectedTeamId} type="team" isDarkMode={isDarkMode} />
+                                </div>
+                            </>
+                        ) : (
+                            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', opacity: 0.3 }}>
+                                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                                </svg>
+                                <p style={{ marginTop: '20px', fontWeight: '700' }}>Select a team to start collaborating</p>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* TAB CONTENT: OFFICIAL EVENTS */}
+            {tab === 'events' && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr', height: '75vh' }}>
+                    <div style={{
+                        background: 'rgba(255,255,255,0.02)',
+                        borderRadius: '32px',
+                        border: '1px solid rgba(255,255,255,0.08)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        overflow: 'hidden'
+                    }}>
+                        {/* Sub-Tabs for Event Feed */}
                         <div style={{
-                            padding: '12px 20px',
-                            background: 'rgba(255,255,255,0.02)',
+                            padding: '24px 32px',
                             borderBottom: '1px solid rgba(255,255,255,0.05)',
                             display: 'flex',
+                            justifyContent: 'space-between',
                             alignItems: 'center',
-                            gap: '10px'
+                            overflowX: 'auto',
+                            gap: '20px'
                         }}>
-                            <div style={{
-                                width: '10px',
-                                height: '10px',
-                                borderRadius: '50%',
-                                background: selectedEventTab === 'all' ? '#646cff' : '#10b981',
-                                boxShadow: `0 0 10px ${selectedEventTab === 'all' ? '#646cff' : '#10b981'}`
-                            }}></div>
-                            <span style={{ fontSize: '0.9rem', fontWeight: 600, color: '#eee' }}>
-                                {selectedEventTab === 'all' ? 'Official Announcements' : `Discussion: ${joinedEvents.find(e => e.id === selectedEventTab)?.title}`}
-                            </span>
+                            <div style={{ display: 'flex', gap: '10px' }}>
+                                <button
+                                    onClick={() => setSelectedEventTab('all')}
+                                    style={{
+                                        padding: '10px 20px',
+                                        borderRadius: '12px',
+                                        border: 'none',
+                                        cursor: 'pointer',
+                                        fontSize: '0.8rem',
+                                        fontWeight: '800',
+                                        background: selectedEventTab === 'all' ? '#bcec15' : 'rgba(255,255,255,0.05)',
+                                        color: selectedEventTab === 'all' ? 'black' : 'inherit',
+                                        transition: '0.2s'
+                                    }}
+                                >
+                                    GLOBAL ANNOUNCEMENTS
+                                </button>
+                                {joinedEvents.map(ev => (
+                                    <button
+                                        key={ev.id}
+                                        onClick={() => setSelectedEventTab(ev.id)}
+                                        style={{
+                                            padding: '10px 20px',
+                                            borderRadius: '12px',
+                                            border: 'none',
+                                            cursor: 'pointer',
+                                            fontSize: '0.8rem',
+                                            fontWeight: '800',
+                                            background: selectedEventTab === ev.id ? '#bcec15' : 'rgba(255,255,255,0.05)',
+                                            color: selectedEventTab === ev.id ? 'black' : 'inherit',
+                                            transition: '0.2s',
+                                            whiteSpace: 'nowrap'
+                                        }}
+                                    >
+                                        {ev.title.toUpperCase()}
+                                    </button>
+                                ))}
+                            </div>
+                            <div style={{ fontSize: '0.75rem', fontWeight: '900', opacity: 0.4, letterSpacing: '1px' }}>
+                                {selectedEventTab === 'all' ? 'GENERAL FEED' : 'DISCUSSION BOARD'}
+                            </div>
                         </div>
-                        <div style={{ flex: 1, overflow: 'hidden' }}>
+
+                        <div style={{ flex: 1, position: 'relative' }}>
                             <ChatRoom
                                 key={selectedEventTab}
                                 communityId={selectedEventTab === 'all' ? 'official_event_feed' : selectedEventTab}
                                 type="event"
+                                isDarkMode={isDarkMode}
                             />
                         </div>
                     </div>
                 </div>
-            ) : (
-                <div style={{
-                    height: '82vh',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    background: '#121212',
-                    borderRadius: '24px',
-                    padding: '25px',
-                    boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
-                    border: '1px solid rgba(255,255,255,0.05)',
-                    overflow: 'hidden'
-                }}>
-                    <h3 style={{
-                        borderLeft: '4px solid #10b981',
-                        paddingLeft: '15px',
-                        color: '#10b981',
-                        marginTop: 0,
-                        marginBottom: '20px',
-                        fontSize: '1.5rem'
+            )}
+
+            {/* TAB CONTENT: COMMUNITY */}
+            {tab === 'club' && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr', height: '75vh' }}>
+                    <div style={{
+                        background: 'rgba(255,255,255,0.02)',
+                        borderRadius: '32px',
+                        border: '1px solid rgba(255,255,255,0.08)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        overflow: 'hidden'
                     }}>
-                        Club Community Chat
-                    </h3>
-                    <div style={{ flex: 1, overflow: 'hidden', borderRadius: '20px', background: 'rgba(0,0,0,0.2)' }}>
-                        <ChatRoom communityId="global_club_community" type="club" />
+                        <div style={{ padding: '24px 32px', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div>
+                                <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: '900', letterSpacing: '-0.5px' }}>CLUB COMMUNITY</h2>
+                                <p style={{ margin: '4px 0 0 0', opacity: 0.4, fontSize: '0.85rem', fontWeight: '600' }}>NETWORK WITH MEMBERS ACROSS ALL CLUBS</p>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', opacity: 0.6 }}>
+                                <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#bcec15', boxShadow: '0 0 10px #bcec15' }}></div>
+                                <span style={{ fontSize: '0.7rem', fontWeight: '900' }}>LIVE CHAT</span>
+                            </div>
+                        </div>
+                        <div style={{ flex: 1, position: 'relative' }}>
+                            <ChatRoom communityId="global_club_community" type="club" isDarkMode={isDarkMode} />
+                        </div>
                     </div>
                 </div>
             )}
+
+            <style>{`
+                ::-webkit-scrollbar {
+                    width: 6px;
+                }
+                ::-webkit-scrollbar-track {
+                    background: transparent;
+                }
+                ::-webkit-scrollbar-thumb {
+                    background: rgba(255,255,255,0.1);
+                    border-radius: 10px;
+                }
+                ::-webkit-scrollbar-thumb:hover {
+                    background: rgba(255,255,255,0.2);
+                }
+            `}</style>
         </div>
     );
 };
 
-
 export default Feed;
+

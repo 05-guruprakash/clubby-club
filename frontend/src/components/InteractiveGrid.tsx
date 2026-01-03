@@ -114,7 +114,8 @@ const InteractiveGrid: React.FC<InteractiveGridProps> = ({ isDarkMode = true }) 
 
                     if (distance < connectionDistance) {
                         const opacityValue = 1 - (distance / connectionDistance);
-                        ctx.strokeStyle = `rgba(${voltColor.r}, ${voltColor.g}, ${voltColor.b}, ${opacityValue * 0.5})`;
+                        // Increased opacity multiplier from 0.5 to 0.8 for higher visibility
+                        ctx.strokeStyle = `rgba(${voltColor.r}, ${voltColor.g}, ${voltColor.b}, ${opacityValue * 0.8})`;
                         ctx.lineWidth = 1;
                         ctx.beginPath();
                         ctx.moveTo(particles[a].x, particles[a].y);
@@ -176,7 +177,8 @@ const InteractiveGrid: React.FC<InteractiveGridProps> = ({ isDarkMode = true }) 
             left: 0,
             width: '100vw',
             height: '100vh',
-            background: isDarkMode ? '#050505' : '#f0f0f0',
+            // Darker gray for light mode to reduce "whiteness"
+            background: isDarkMode ? '#050505' : '#e6e6e6',
             zIndex: -1,
             overflow: 'hidden',
             transition: 'background 0.5s ease'
@@ -192,7 +194,7 @@ const InteractiveGrid: React.FC<InteractiveGridProps> = ({ isDarkMode = true }) 
                 height: '100%',
                 background: isDarkMode
                     ? 'radial-gradient(circle at center, transparent 0%, rgba(0,0,0,0.6) 100%)'
-                    : 'radial-gradient(circle at center, transparent 0%, rgba(255,255,255,0.6) 100%)',
+                    : 'radial-gradient(circle at center, transparent 0%, rgba(255,255,255,0.1) 100%)', // Reduced opacity from 0.6 to 0.1
                 pointerEvents: 'none'
             }} />
         </div>

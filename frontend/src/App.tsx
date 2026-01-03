@@ -76,10 +76,10 @@ const AppContent = () => {
   if (profileComplete === null) return <div>Loading Profile...</div>;
 
   return (
-    <GlobalShell setView={setView} currentView={currentView}>
+    <GlobalShell setView={setView} currentView={currentView} isDarkMode={isDarkMode} toggleTheme={toggleTheme}>
       {currentView === 'discover' && <Discover />}
       {currentView === 'clubs' && <Clubs />}
-      {currentView === 'feed' && <Feed />}
+      {currentView === 'feed' && <Feed isDarkMode={isDarkMode} />}
       {currentView === 'notifications' && <Notifications />}
       {currentView === 'profile' && <Profile setView={setView} />}
     </GlobalShell>
