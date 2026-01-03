@@ -2,6 +2,10 @@ const express = require("express");
 const { verifyToken } = require("../middleware/auth");
 const { requireRole } = require("../middleware/rbac");
 const { admin, db } = require("../config/firebase");
+const {
+  notifyAdminsOfJoinRequest,
+  notifyRequestApproval,
+} = require("../services/notification.service");
 
 const router = express.Router();
 
@@ -15,7 +19,8 @@ router.post("/:id/join", verifyToken, async (req, res) => {
     try {
       console.log(`DEBUG: Joining club ${clubId} for user ${userId}`);
       const clubDoc = await db.collection("clubs").doc(clubId).get();
-      if (!clubDoc.exists) return res.status(404).json({ error: "Club not found" });
+      if (!clubDoc.exists)
+        return res.status(404).json({ error: "Club not found" });
 
       const clubData = clubDoc.data();
       const requiresApproval = clubData.requiresApproval || false;
@@ -27,25 +32,47 @@ router.post("/:id/join", verifyToken, async (req, res) => {
 
       if (requiresApproval) {
         await memberRef.set({
-          userId, status: 'pending', role: 'member', joined_at: new Date()
+          userId,
+          status: "pending",
+          role: "member",
+          joined_at: new Date(),
         });
-        await userRef.set({
-          pending_clubs: admin.firestore.FieldValue.arrayUnion(clubId)
-        }, { merge: true });
-        res.json({ message: "Request pending", status: 'pending' });
+        await userRef.set(
+          {
+            pending_clubs: admin.firestore.FieldValue.arrayUnion(clubId),
+          },
+          { merge: true }
+        );
+
+        // Notify admins about the join request
+        const userDoc = await userRef.get();
+        const userName =
+          userDoc.data()?.name || userDoc.data()?.email || "A user";
+        const clubName = clubData.name || "the club";
+        await notifyAdminsOfJoinRequest(clubId, clubName, userId, userName);
+
+        res.json({ message: "Request pending", status: "pending" });
       } else {
         await memberRef.set({
-          userId, status: 'active', role: 'member', joined_at: new Date()
+          userId,
+          status: "active",
+          role: "member",
+          joined_at: new Date(),
         });
-        await userRef.set({
-          joined_clubs: admin.firestore.FieldValue.arrayUnion(clubId)
-        }, { merge: true });
-        await db.collection("clubs").doc(clubId).update({
-          member_count: admin.firestore.FieldValue.increment(1)
-        });
-        res.json({ message: "Joined successfully", status: 'active' });
+        await userRef.set(
+          {
+            joined_clubs: admin.firestore.FieldValue.arrayUnion(clubId),
+          },
+          { merge: true }
+        );
+        await db
+          .collection("clubs")
+          .doc(clubId)
+          .update({
+            member_count: admin.firestore.FieldValue.increment(1),
+          });
+        res.json({ message: "Joined successfully", status: "active" });
       }
-
     } catch (dbErr) {
       console.warn("DB FAILURE (Backing up to Mock):", dbErr.message);
       // MOCK SUCCESS
@@ -56,12 +83,12 @@ router.post("/:id/join", verifyToken, async (req, res) => {
 
       // Check if we should simulate "Pending" or "Active"
       // Hardcode requiresApproval logic based on known IDs if possible, or default to Active
-      // The Club Card on frontend knows if it needs approval. 
+      // The Club Card on frontend knows if it needs approval.
       // We can return a generic success and let frontend decide?
       // No, frontend expects 'status'.
 
       // Simulating "Active" for now to unblock
-      res.json({ message: "[MOCK] Joined successfully", status: 'active' });
+      res.json({ message: "[MOCK] Joined successfully", status: "active" });
     }
   } catch (err) {
     console.error("Join Error:", err);
@@ -79,19 +106,33 @@ router.post("/:id/approve", verifyToken, async (req, res) => {
     // For now, allowing as requested to "make it work"
 
     await db.doc(`clubs/${clubId}/members/${targetUserId}`).update({
-      status: 'active',
-      joined_at: new Date()
+      status: "active",
+      joined_at: new Date(),
     });
 
-    await db.collection("users").doc(targetUserId).set({
-      joined_clubs: admin.firestore.FieldValue.arrayUnion(clubId),
-      pending_clubs: admin.firestore.FieldValue.arrayRemove(clubId),
-      [`roles.${clubId}`]: 'member'
-    }, { merge: true });
+    await db
+      .collection("users")
+      .doc(targetUserId)
+      .set(
+        {
+          joined_clubs: admin.firestore.FieldValue.arrayUnion(clubId),
+          pending_clubs: admin.firestore.FieldValue.arrayRemove(clubId),
+          [`roles.${clubId}`]: "member",
+        },
+        { merge: true }
+      );
 
-    await db.collection("clubs").doc(clubId).update({
-      member_count: admin.firestore.FieldValue.increment(1)
-    });
+    await db
+      .collection("clubs")
+      .doc(clubId)
+      .update({
+        member_count: admin.firestore.FieldValue.increment(1),
+      });
+
+    // Notify the user about approval
+    const clubDoc = await db.collection("clubs").doc(clubId).get();
+    const clubName = clubDoc.data()?.name || "the club";
+    await notifyRequestApproval(targetUserId, clubId, clubName, true);
 
     res.json({ message: "Member approved" });
   } catch (err) {
@@ -106,9 +147,20 @@ router.post("/:id/reject", verifyToken, async (req, res) => {
     const { targetUserId } = req.body;
 
     await db.doc(`clubs/${clubId}/members/${targetUserId}`).delete();
-    await db.collection("users").doc(targetUserId).set({
-      pending_clubs: admin.firestore.FieldValue.arrayRemove(clubId)
-    }, { merge: true });
+    await db
+      .collection("users")
+      .doc(targetUserId)
+      .set(
+        {
+          pending_clubs: admin.firestore.FieldValue.arrayRemove(clubId),
+        },
+        { merge: true }
+      );
+
+    // Notify the user about rejection
+    const clubDoc = await db.collection("clubs").doc(clubId).get();
+    const clubName = clubDoc.data()?.name || "the club";
+    await notifyRequestApproval(targetUserId, clubId, clubName, false);
 
     res.json({ message: "Member rejected" });
   } catch (err) {
@@ -129,21 +181,27 @@ router.post("/:id/leave", verifyToken, async (req, res) => {
       await db.doc(`clubs/${clubId}/members/${userId}`).delete();
 
       // Remove from user's joined list
-      await db.collection("users").doc(userId).update({
-        joined_clubs: admin.firestore.FieldValue.arrayRemove(clubId),
-        [`roles.${clubId}`]: admin.firestore.FieldValue.delete()
-      });
+      await db
+        .collection("users")
+        .doc(userId)
+        .update({
+          joined_clubs: admin.firestore.FieldValue.arrayRemove(clubId),
+          [`roles.${clubId}`]: admin.firestore.FieldValue.delete(),
+        });
 
       // Decrement member count
-      await db.collection("clubs").doc(clubId).update({
-        member_count: admin.firestore.FieldValue.increment(-1)
-      });
+      await db
+        .collection("clubs")
+        .doc(clubId)
+        .update({
+          member_count: admin.firestore.FieldValue.increment(-1),
+        });
 
-      res.json({ message: "Left club successfully", status: 'left' });
+      res.json({ message: "Left club successfully", status: "left" });
     } catch (dbErr) {
       console.warn("DB FAILURE (Backing up to Mock Leave):", dbErr.message);
       // MOCK SUCCESS
-      res.json({ message: "[MOCK] Left club successfully", status: 'left' });
+      res.json({ message: "[MOCK] Left club successfully", status: "left" });
     }
   } catch (err) {
     console.error("Leave Error:", err);
@@ -158,12 +216,18 @@ router.post("/:id/role", verifyToken, async (req, res) => {
     const { targetUserId, newRole } = req.body;
 
     await db.doc(`clubs/${clubId}/members/${targetUserId}`).update({
-      role: newRole
+      role: newRole,
     });
 
-    await db.collection("users").doc(targetUserId).set({
-      [`roles.${clubId}`]: newRole
-    }, { merge: true });
+    await db
+      .collection("users")
+      .doc(targetUserId)
+      .set(
+        {
+          [`roles.${clubId}`]: newRole,
+        },
+        { merge: true }
+      );
 
     res.json({ message: "Role updated" });
   } catch (err) {
@@ -180,7 +244,9 @@ router.post("/chat/like", verifyToken, async (req, res) => {
     const userId = req.user.uid;
     const msgRef = db.collection("community_messages").doc(messageId);
 
-    console.log(`✅ [CHAT:LIKE] Processing message ${messageId} for user ${userId}`);
+    console.log(
+      `✅ [CHAT:LIKE] Processing message ${messageId} for user ${userId}`
+    );
 
     const doc = await msgRef.get();
     if (!doc.exists) {
@@ -190,14 +256,20 @@ router.post("/chat/like", verifyToken, async (req, res) => {
 
     const currentLikes = doc.data().likes || [];
     if (currentLikes.includes(userId)) {
-      await msgRef.set({
-        likes: admin.firestore.FieldValue.arrayRemove(userId)
-      }, { merge: true });
+      await msgRef.set(
+        {
+          likes: admin.firestore.FieldValue.arrayRemove(userId),
+        },
+        { merge: true }
+      );
       console.log(`👍 [CHAT:LIKE] Unliked message ${messageId}`);
     } else {
-      await msgRef.set({
-        likes: admin.firestore.FieldValue.arrayUnion(userId)
-      }, { merge: true });
+      await msgRef.set(
+        {
+          likes: admin.firestore.FieldValue.arrayUnion(userId),
+        },
+        { merge: true }
+      );
       console.log(`👍 [CHAT:LIKE] Liked message ${messageId}`);
     }
     res.json({ success: true });
@@ -219,9 +291,12 @@ router.post("/chat/comment", verifyToken, async (req, res) => {
 
     const msgRef = db.collection("community_messages").doc(messageId);
 
-    await msgRef.set({
-      comments: admin.firestore.FieldValue.arrayUnion(comment)
-    }, { merge: true });
+    await msgRef.set(
+      {
+        comments: admin.firestore.FieldValue.arrayUnion(comment),
+      },
+      { merge: true }
+    );
 
     console.log(`💬 [CHAT:COMMENT] Comment added successfully`);
     res.json({ success: true });
