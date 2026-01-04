@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { collection, updateDoc, doc, getDocs, query, where, addDoc, onSnapshot, arrayUnion, deleteDoc, setDoc } from 'firebase/firestore';
 import { db, auth } from '../firebaseConfig';
+import { API_BASE } from '../config';
 
 const AdminTools = () => {
     // Event Creation State
@@ -45,7 +46,7 @@ const AdminTools = () => {
             if (!token) throw new Error("Authentication failed. Please log in again.");
 
             console.log("Step 2: Sending request to backend center...");
-            const response = await fetch('http://localhost:3001/events/official', {
+            const response = await fetch(`${API_BASE}/events/official`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

@@ -2,6 +2,7 @@ import { useEffect, useState, type FC } from 'react';
 import { collection, query, where, doc, getDoc, setDoc, updateDoc, arrayUnion, deleteDoc, increment, arrayRemove, deleteField, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 import { useAuth } from '../AuthContext';
+import { API_BASE } from '../config';
 // ChatRoom removed - using Go to Community button instead
 
 interface Club {
@@ -68,7 +69,7 @@ const Clubs: FC<ClubsProps> = ({ isDarkMode = true }) => {
     });
     const [activeTab, setActiveTab] = useState<'all' | 'joined'>('all');
 
-    const API_BASE = 'http://localhost:3001';
+
 
     // Helpers for local persistence
     const getLocalJoined = () => {

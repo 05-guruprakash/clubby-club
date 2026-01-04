@@ -5,6 +5,7 @@
   "scripts": {
     "start": "node src/server.js",
     "frontend": "cd frontend && npm run dev",
+    "build": "cd frontend && npm install && npm run build",
     "dev": "node -e \"const { spawn } = require('child_process'); spawn('npm', ['start'], { stdio: 'inherit', shell: true }); spawn('npm', ['run', 'frontend'], { stdio: 'inherit', shell: true });\""
   },
   "dependencies": {

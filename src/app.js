@@ -1,4 +1,5 @@
 const express = require("express");
+const path = require("path");
 const cors = require("cors");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
@@ -99,6 +100,16 @@ app.use("/posts", postRoutes);
 
 const teamRoutes = require("./routes/teams.routes");
 app.use("/teams", teamRoutes);
+
+// Serve static files from the React app
+app.use(express.static(path.join(__dirname, "../frontend/dist")));
+
+// The "catchall" handler: for any request that doesn't
+// match one above, send back React's index.html file.
+app.get("*", (req, res, next) => {
+  if (req.url.startsWith('/api')) return next(); // Optional: if you had api prefix
+  res.sendFile(path.join(__dirname, "../frontend/dist/index.html"));
+});
 
 // Global error handler
 app.use((err, req, res, next) => {

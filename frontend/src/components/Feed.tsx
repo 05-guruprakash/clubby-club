@@ -3,6 +3,7 @@ import { collection, query, where, getDocs, doc, getDoc, updateDoc, deleteDoc, i
 import { db } from '../firebaseConfig';
 import { useAuth } from '../AuthContext';
 import ChatRoom from './ChatRoom';
+import { API_BASE } from '../config';
 
 interface Team {
     id: string;
@@ -161,7 +162,7 @@ const Feed = ({ isDarkMode }: { isDarkMode: boolean }) => {
 
             console.log("Stage 1: Attempting backend disband...");
             const token = await user.getIdToken();
-            const response = await fetch(`http://localhost:3001/teams/${selectedTeamId}`, {
+            const response = await fetch(`${API_BASE}/teams/${selectedTeamId}`, {
                 method: 'DELETE',
                 headers: { 'Authorization': `Bearer ${token}` }
             });

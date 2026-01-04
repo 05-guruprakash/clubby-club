@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, type FC } from 'react';
 import { collection, addDoc, onSnapshot, query, where, serverTimestamp, getDoc, doc, arrayUnion, arrayRemove, setDoc } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 import { useAuth } from '../AuthContext';
+import { API_BASE } from '../config';
 
 interface ChatRoomProps {
     communityId: string;
@@ -54,7 +55,7 @@ const ChatRoom: FC<ChatRoomProps> = ({ communityId, type, isDarkMode }) => {
     useEffect(() => {
         const checkServer = async () => {
             try {
-                const res = await fetch('http://localhost:3001/health').catch(() => ({ ok: false }));
+                const res = await fetch(`${API_BASE}/health`).catch(() => ({ ok: false }));
                 setIsServerAlive(!!res.ok);
             } catch (e) {
                 setIsServerAlive(false);
@@ -104,7 +105,7 @@ const ChatRoom: FC<ChatRoomProps> = ({ communityId, type, isDarkMode }) => {
         if (type === 'club' || type === 'event') {
             try {
                 const token = await user.getIdToken();
-                const response = await fetch('http://localhost:3001/clubs/chat/comment', {
+                const response = await fetch(`${API_BASE}/clubs/chat/comment`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                     body: JSON.stringify({ messageId: msgId, comment: newComment })
@@ -291,7 +292,7 @@ const ChatRoom: FC<ChatRoomProps> = ({ communityId, type, isDarkMode }) => {
         if (type === 'club' || type === 'event') {
             try {
                 const token = await user.getIdToken();
-                const response = await fetch('http://localhost:3001/clubs/chat/like', {
+                const response = await fetch(`${API_BASE}/clubs/chat/like`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                     body: JSON.stringify({ messageId: msg.id })

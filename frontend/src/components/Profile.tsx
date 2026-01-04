@@ -5,6 +5,7 @@ import { db, auth } from '../firebaseConfig';
 import { useAuth } from '../AuthContext';
 import AdminGuard from './AdminGuard';
 import AdminTools from './AdminTools';
+import { API_BASE } from '../config';
 
 // Types
 interface UserProfile {
@@ -54,7 +55,7 @@ const Profile = ({ setView, isDarkMode = true }: ProfileProps) => {
     const [uploading, setUploading] = useState(false);
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
-    const API_BASE = 'http://localhost:3001';
+
 
     // Parallax scroll effect
     useEffect(() => {

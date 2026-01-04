@@ -63,8 +63,8 @@ node_modules/
 .yarn-integrity
 
 # dotenv environment variables file
-# .env (Unlocking as requested)
-# serviceAccountKey.json (Unlocking as requested)
+.env
+serviceAccountKey.json
 
 # dataconnect generated files
 .dataconnect
