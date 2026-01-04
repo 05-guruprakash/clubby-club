@@ -1,26 +1,32 @@
 require("dotenv").config();
 const admin = require("firebase-admin");
+const fs = require("fs");
+const path = require("path");
 
 let app;
 if (!admin.apps.length) {
-  try {
-    const serviceAccount = require("../../serviceAccountKey.json");
+  const serviceAccountPath = path.resolve(__dirname, "../../serviceAccountKey.json");
 
-    // Ensure handles both JSON escape \n and literal newlines
-    const privateKey = serviceAccount.private_key && serviceAccount.private_key.replace(/\\n/g, "\n");
+  if (fs.existsSync(serviceAccountPath)) {
+    try {
+      const serviceAccount = require(serviceAccountPath);
+      // Ensure handles both JSON escape \n and literal newlines
+      const privateKey = serviceAccount.private_key && serviceAccount.private_key.replace(/\\n/g, "\n");
 
-    app = admin.initializeApp({
-      credential: admin.credential.cert({
-        ...serviceAccount,
-        private_key: privateKey
-      }),
-      databaseURL: `https://${serviceAccount.project_id}.firebaseio.com`,
-      storageBucket: "gdg-7327.appspot.com"
-    });
-    console.log(`🚀 Connected to PRODUCTION Firebase via serviceAccountKey.json`);
-  } catch (err) {
-    console.error("❌ Firebase Admin Initialization Error:", err.message);
-
+      app = admin.initializeApp({
+        credential: admin.credential.cert({
+          ...serviceAccount,
+          private_key: privateKey
+        }),
+        databaseURL: `https://${serviceAccount.project_id}.firebaseio.com`,
+        storageBucket: "gdg-7327.appspot.com"
+      });
+      console.log(`🚀 Connected to PRODUCTION Firebase via serviceAccountKey.json`);
+    } catch (err) {
+      console.error("❌ Error loading serviceAccountKey.json:", err);
+    }
+  } else {
+    console.log("⚠️ serviceAccountKey.json not found, checking Environment Variables...");
     // Fallback to environment variables
     try {
       const projId = process.env.FIREBASE_PROJECT_ID || "gdg-7327";
@@ -38,6 +44,8 @@ if (!admin.apps.length) {
           storageBucket: `${projId}.appspot.com`
         });
         console.log(`🚀 Connected to PRODUCTION Firebase via ENV Vars`);
+      } else {
+        console.warn("❌ No Firebase credentials found! Set FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY env vars.");
       }
     } catch (envErr) {
       console.error("❌ Firebase Admin ENV Initialization Error:", envErr.message);
@@ -47,7 +55,11 @@ if (!admin.apps.length) {
   app = admin.app();
 }
 
+if (!app) {
+  throw new Error("🔥 Firebase failed to initialize. Check your 'serviceAccountKey.json' or Environment Variables (FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY).");
+}
+
 const auth = app.auth();
 const db = app.firestore();
 
-module.exports = { admin, auth, db };
+  module.exports = { admin, auth, db };
